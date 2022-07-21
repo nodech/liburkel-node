@@ -1,0 +1,15 @@
+*.1sdk.pdb
+*.lastbuildstate
+*.obj
+*.sln
+*.tlog
+*.vcxproj
+*.vcxproj.filters
+*~
+.nyc_output
+Release/
+build-pre-gyp/
+build/
+node_modules/
+npm-debug.log
+yarn.lock

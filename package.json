@@ -1,0 +1,21 @@
+{
+  "name": "liburkel-node",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "bmocha": "^2.1.6"
+  },
+  "engines": {
+    "node": ">=10.0.0"
+  },
+  "dependencies": {
+    "bsert": "^0.0.10",
+    "loady": "^0.0.5"
+  }
+}
