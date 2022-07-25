@@ -1,5 +1,5 @@
 {
-  "variables": [
+  "variables": {
     "conditions": [
       ["OS == 'win'", {
         "tls_keyword%": "__declspec(thread)"
@@ -7,8 +7,6 @@
         "tls_keyword%": "<!(./deps/checks/check_tls.sh)"
       }],
     ]
-  ],
-  "target_defaults": {
   },
   "targets": [
     {
@@ -65,7 +63,7 @@
         }],
         ["OS == 'linux'", {
           "defines": ["_POSIX_C_SOURCE=200112"]
-        }]
+        }],
         ["OS == 'win'", {
           "defines": ["_WIN32_WINNT=0x0501"]
         }],
@@ -73,6 +71,37 @@
           "defines": ["URKEL_TLS=<(tls_keyword)"]
         }]
       ],
+    },
+    {
+      "target_name": "nurkel",
+      "dependencies": [
+        "liburkel"
+      ],
+      "sources": [
+        "./src/nurkel.c"
+      ],
+      "conditions": [
+        ["OS != 'mac' and OS != 'win'", {
+          "cflags": [
+            "-Wcast-align",
+            "-Wshadow"
+          ]
+        }],
+        ["OS == 'mac'", {
+          "xcode_settings": {
+            "WARNING_CFLAGS": [
+              "-Wcast-align",
+              "-Wshadow"
+            ]
+          }
+        }],
+        ["OS == 'win'", {
+          "msvs_disabled_warnings=": [
+            4244, # implicit integer demotion
+            4267  # implicit size_t demotion
+          ]
+        }],
+      ]
     }
   ]
 }
