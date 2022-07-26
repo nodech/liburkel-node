@@ -2,15 +2,24 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <node_api.h>
+
 #include <urkel.h>
+#include <node_api.h>
 
 #define JS_ERR_INIT "Failed to initialize."
 #define JS_ERR_NOT_IMPL "Not implemented."
+#define JS_ERR_ARG "Invalid argument."
+#define JS_ERR_DB_OPEN "Database is already open."
+#define JS_ERR_DB_CLOSED "Database is closed."
+#define JS_ERR_ALLOC "Allocation failed."
+#define JS_ERR_NODE "Node internal error."
 
-/*
- * Helpers
- */
+#define JS_ERR_URKEL_UNKNOWN "Unknown urkel error."
+#define JS_ERR_URKEL_OPEN "Urkel open failed."
+#define JS_ERR_URKEL_CLOSE "Urkel close failed."
+
+#define ASYNC_OPEN "nurkel_open"
+#define ASYNC_CLOSE "nurkel_close"
 
 #define CHECK(expr) do {                           \
   if (!(expr))                                     \
@@ -24,6 +33,67 @@
 
 #define JS_ASSERT(cond, msg) if (!(cond)) JS_THROW(msg)
 
+/*
+ * Urkel errors
+ */
+
+/* Errnos start with 1, 0 = everything's ok. */
+static char *urkel_errors[] = {
+  "URKEL_EHASHMISMATCH",
+  "URKEL_ESAMEKEY",
+  "URKEL_ESAMEPATH",
+  "URKEL_ENEGDEPTH",
+  "URKEL_EPATHMISMATCH",
+  "URKEL_ETOODEEP",
+  "URKEL_EINVAL",
+  "URKEL_ENOTFOUND",
+  "URKEL_ECORRUPTION",
+  "URKEL_ENOUPDATE",
+  "URKEL_EBADWRITE",
+  "URKEL_EBADOPEN",
+  "URKEL_EITEREND"
+};
+
+static const int urkel_errors_len = 13;
+
+/*
+ * NAPI Context wrappers for the urkel.
+ */
+
+typedef struct nurkel_tree_s {
+  urkel_t *tree;
+  napi_ref ref;
+  bool is_open;
+  bool is_opening;
+  bool is_closing;
+} nurkel_tree_t;
+
+/*
+ * Worker setup
+ */
+
+typedef struct nurkel_open_worker_s {
+  void *ctx;
+  char *path;
+  size_t path_len;
+  int errno;
+  bool success;
+  napi_deferred deferred;
+  napi_async_work work;
+} nurkel_open_worker_t;
+
+typedef struct nurkel_close_worker_s {
+  void *ctx;
+  int errno;
+  bool success;
+  napi_deferred deferred;
+  napi_async_work work;
+} nurkel_close_worker_t;
+
+/*
+ * Helpers
+ */
+
 void
 nurkel_assert_fail(const char *file, int line, const char *expr) {
   fprintf(stderr, "%s:%d: Assertion `%s' failed.\n", file, line, expr);
@@ -31,50 +101,70 @@ nurkel_assert_fail(const char *file, int line, const char *expr) {
   abort();
 }
 
+napi_status
+read_value_string_latin1(napi_env env, napi_value value,
+                         char **str, size_t *length) {
+  char *buf;
+  size_t buflen;
+  napi_status status;
+
+  status = napi_get_value_string_latin1(env, value, NULL, 0, &buflen);
+
+  if (status != napi_ok)
+    return status;
+
+  buf = malloc(buflen + 1);
+
+  if (buf == NULL)
+    return napi_generic_failure;
+
+  status = napi_get_value_string_latin1(env,
+                                        value,
+                                        buf,
+                                        buflen + 1,
+                                        length);
+
+  if (status != napi_ok) {
+    free(buf);
+    return status;
+  }
+
+  CHECK(*length == buflen);
+
+  *str = buf;
+
+  return napi_ok;
+}
+
 /*
- * NAPI Context wrappers for the urkel.
+ * Context wrapper init/deinit helpers.
  */
 
-typedef struct nurkel_db_s {
-  urkel_t *tree;
-  napi_ref ref;
-  bool is_open;
-  bool is_opening;
-  bool is_closing;
-} nurkel_db_t;
-
 static void
-nurkel_db_init(nurkel_db_t *db) {
+nurkel_db_init(nurkel_tree_t *db) {
   db->tree = NULL;
   db->ref = NULL;
-  db->is_open = 0;
-  db->is_opening = 0;
-  db->is_closing = 0;
+  db->is_open = false;
+  db->is_opening = false;
+  db->is_closing = false;
 }
+
+static void
+nurkel_db_uninit(nurkel_tree_t *db) {
+  free(db);
+}
+
+/*
+ * NAPI for urkel.
+ *
+ * Note that functions ending with _exec are all executed in
+ * the worker pool thread. They should not access/call JS
+ * or napi_env. If it's absolutely necessary check `napi_thread_safe_function`.
+ */
 
 /*
  * DB Init
  */
-
-/*
- * Hook for when the environment exits. This hook will be called after
- * already-scheduled napi_async_work items have finished, which gives us
- * the guarantee that no db operations will be in-flight at this time.
- */
-
-static void
-nurkel_db_env_cleanup(void *arg) {
-  nurkel_db_t *ndb = (nurkel_db_t *)arg;
-
-  if (ndb->is_open) {
-    // TODO: Clean up if there are open iterators or transactions.
-    urkel_close(ndb->tree);
-
-    ndb->is_open = false;
-    ndb->is_opening = false;
-    ndb->is_closing = false;
-  }
-}
 
 /*
  * This is called when db variable goes out of scope and gets GCed. We need to
@@ -85,18 +175,17 @@ nurkel_db_env_cleanup(void *arg) {
  */
 static void
 nurkel_db_destroy(napi_env env, void *data, void *hint) {
+  (void)env;
   (void)hint;
 
   if (data) {
-    nurkel_db_t *ndb = (nurkel_db_t *)data;
+    nurkel_tree_t *ctx = (nurkel_tree_t *)data;
 
-    // It went out of scope. We don't need to clean up.
-    napi_remove_env_cleanup_hook(env, nurkel_db_env_cleanup, ndb);
-    // TODO: Maybe close if its open?
+    /* TODO: close if its open */
 
-    // DB Should be cleaned up by urkel_free
-    CHECK(ndb->tree == NULL);
-    free(ndb);
+    /* DB Should be cleaned up by urkel_free */
+    CHECK(ctx->tree == NULL);
+    nurkel_db_uninit(ctx);
   }
 }
 
@@ -105,18 +194,11 @@ nurkel_init(napi_env env, napi_callback_info info) {
   (void)info;
   napi_status status;
   napi_value result;
-  nurkel_db_t *ctx;
+  nurkel_tree_t *ctx;
 
-  ctx = malloc(sizeof(nurkel_db_t));
+  ctx = malloc(sizeof(nurkel_tree_t));
   CHECK(ctx != NULL);
   nurkel_db_init(ctx);
-
-  status = napi_add_env_cleanup_hook(env, nurkel_db_env_cleanup, ctx);
-
-  if (status != napi_ok) {
-    free(ctx);
-    JS_THROW(JS_ERR_INIT);
-  }
 
   status = napi_create_external(env, ctx, nurkel_db_destroy, NULL, &result);
 
@@ -137,16 +219,256 @@ nurkel_init(napi_env env, napi_callback_info info) {
   return result;
 }
 
-static napi_value
-nurkel_open(napi_env env, napi_callback_info info) {
-  (void)info;
-  JS_THROW(JS_ERR_NOT_IMPL);
+/*
+ * DB Open and related.
+ */
+
+static void
+nurkel_open_exec(napi_env env, void *data) {
+  (void)env;
+  nurkel_open_worker_t *worker = (nurkel_open_worker_t *)data;
+  nurkel_tree_t *ctx = (nurkel_tree_t *)worker->ctx;
+
+  ctx->tree = urkel_open(worker->path);
+
+  if (ctx->tree == NULL) {
+    worker->errno = urkel_errno;
+    return;
+  }
+
+  worker->success = true;
+}
+
+static void
+nurkel_open_complete(napi_env env, napi_status status, void *data) {
+  nurkel_open_worker_t *worker = (nurkel_open_worker_t *)data;
+  nurkel_tree_t *ctx = (nurkel_tree_t *)worker->ctx;
+  napi_value result, msg, code;
+
+  if (status != napi_ok || worker->success == false) {
+    ctx->is_opening = false;
+
+    CHECK(worker->errno > 0 && worker->errno <= urkel_errors_len);
+    CHECK(napi_create_string_latin1(env,
+                                    urkel_errors[worker->errno - 1],
+                                    NAPI_AUTO_LENGTH,
+                                    &code) == napi_ok);
+    CHECK(napi_create_string_latin1(env,
+                                    JS_ERR_URKEL_OPEN,
+                                    NAPI_AUTO_LENGTH,
+                                    &msg) == napi_ok);
+    CHECK(napi_create_error(env, code, msg, &result) == napi_ok);
+    CHECK(napi_reject_deferred(env, worker->deferred, result) == napi_ok);
+    CHECK(napi_delete_async_work(env, worker->work) == napi_ok);
+    free(worker->path);
+    free(worker);
+    return;
+  }
+
+  ctx->is_open = true;
+  ctx->is_opening = false;
+  CHECK(napi_get_undefined(env, &result) == napi_ok);
+  CHECK(napi_resolve_deferred(env, worker->deferred, result) == napi_ok);
+  CHECK(napi_delete_async_work(env, worker->work) == napi_ok);
+  free(worker->path);
+  free(worker);
 }
 
 static napi_value
+nurkel_open(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2];
+  napi_value result, workname;
+  napi_status status;
+  nurkel_open_worker_t *worker = NULL;
+  nurkel_tree_t *ctx = NULL;
+  char *err;
+
+  status = napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+
+  JS_ASSERT(status == napi_ok, JS_ERR_ARG);
+  JS_ASSERT(argc >= 2, JS_ERR_ARG);
+
+  status = napi_get_value_external(env, argv[0], (void **)&ctx);
+  JS_ASSERT(status == napi_ok, JS_ERR_ARG);
+
+  status = napi_create_string_latin1(env,
+                                     ASYNC_OPEN,
+                                     NAPI_AUTO_LENGTH,
+                                     &workname);
+  JS_ASSERT(status == napi_ok, JS_ERR_NODE);
+  JS_ASSERT(!ctx->is_open && !ctx->is_opening, JS_ERR_DB_OPEN);
+  JS_ASSERT(!ctx->is_closing, JS_ERR_DB_CLOSED);
+
+  worker = malloc(sizeof(nurkel_open_worker_t));
+  if (worker == NULL) {
+    err = JS_ERR_ALLOC;
+    goto throw;
+  }
+
+  worker->ctx = ctx;
+  worker->path = NULL;
+  worker->path_len = 0;
+  worker->errno = 0;
+  worker->success = false;
+
+  status = read_value_string_latin1(env,
+                                    argv[1],
+                                    &worker->path,
+                                    &worker->path_len);
+  if (status != napi_ok) {
+    free(worker);
+    JS_THROW(JS_ERR_ARG);
+  }
+
+  status = napi_create_promise(env, &worker->deferred, &result);
+  if (status != napi_ok) {
+    err = JS_ERR_NODE;
+    goto throw;
+  }
+
+  status = napi_create_async_work(env,
+                                  NULL,
+                                  workname,
+                                  nurkel_open_exec,
+                                  nurkel_open_complete,
+                                  worker,
+                                  &worker->work);
+
+  if (status != napi_ok) {
+    err = JS_ERR_NODE;
+    goto throw;
+  }
+
+  ctx->is_opening = true;
+  status = napi_queue_async_work(env, worker->work);
+
+  if (status != napi_ok) {
+    ctx->is_opening = false;
+    err = JS_ERR_NODE;
+    goto throw;
+  }
+
+  return result;
+throw:
+  if (worker != NULL) {
+    free(worker->path);
+    free(worker);
+  }
+
+  JS_THROW(err);
+}
+
+/*
+ * DB Close
+ */
+
+/*
+ * This only needs to be called when everything related
+ * to database has been cleaned up, because this will
+ * free the database.
+ */
+static void
+nurkel_close_exec(napi_env env, void *data) {
+  (void)env;
+  nurkel_close_worker_t *worker = (nurkel_close_worker_t *)data;
+  nurkel_tree_t *ctx = worker->ctx;
+
+  urkel_close(ctx->tree);
+  ctx->tree = NULL;
+  worker->success = true;
+}
+
+/**
+ * Same as above, this is called after _exec.
+ */
+static void
+nurkel_close_complete(napi_env env, napi_status status, void *data) {
+  nurkel_close_worker_t *worker = (nurkel_close_worker_t *)data;
+  nurkel_tree_t *ctx = worker->ctx;
+  napi_value result;
+
+  ctx->is_closing = false;
+  ctx->is_open = false;
+
+  CHECK(napi_get_undefined(env, &result) == napi_ok);
+  CHECK(napi_delete_async_work(env, worker->work) == napi_ok);
+
+  if (status != napi_ok) {
+    CHECK(napi_reject_deferred(env, worker->deferred, result) == napi_ok);
+    free(worker);
+    return;
+  }
+
+  CHECK(napi_resolve_deferred(env, worker->deferred, result) == napi_ok);
+  free(worker);
+}
+
+/**
+ * NAPI Call for closing db.
+ */
+static napi_value
 nurkel_close(napi_env env, napi_callback_info info) {
-  (void)info;
-  JS_THROW(JS_ERR_NOT_IMPL);
+  size_t argc = 1;
+  napi_value argv[1];
+  napi_value result, workname;
+  napi_status status;
+  nurkel_close_worker_t *worker;
+  nurkel_tree_t *ctx = NULL;
+
+  status = napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  JS_ASSERT(status == napi_ok, JS_ERR_ARG);
+  JS_ASSERT(argc >= 1, JS_ERR_ARG);
+
+  status = napi_get_value_external(env, argv[0], (void **)&ctx);
+  JS_ASSERT(status == napi_ok, JS_ERR_ARG);
+
+  status = napi_create_string_latin1(env,
+                                     ASYNC_OPEN,
+                                     NAPI_AUTO_LENGTH,
+                                     &workname);
+  JS_ASSERT(status == napi_ok, JS_ERR_NODE);
+  JS_ASSERT(ctx->is_open && !ctx->is_closing, JS_ERR_DB_CLOSED);
+
+  worker = malloc(sizeof(nurkel_close_worker_t));
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
+
+  worker->ctx = ctx;
+  worker->errno = 0;
+  worker->success = false;
+
+  status = napi_create_promise(env, &worker->deferred, &result);
+  if (status != napi_ok) {
+    free(worker);
+    JS_THROW(JS_ERR_NODE);
+  }
+
+  status = napi_create_async_work(env,
+                                  NULL,
+                                  workname,
+                                  nurkel_close_exec,
+                                  nurkel_close_complete,
+                                  worker,
+                                  &worker->work);
+  if (status != napi_ok) {
+    free(worker);
+    JS_THROW(JS_ERR_NODE);
+  }
+
+  /* TODO: Check if we have running iterator/batch jobs before
+   * running this. If we have, don't run instead store in db->close_worker
+   * and set ->is_closing and wait for batch/iterators to call it once
+   * no pending job is left.
+   */
+  ctx->is_closing = true;
+  status = napi_queue_async_work(env, worker->work);
+
+  if (status != napi_ok) {
+    CHECK(napi_delete_async_work(env, worker->work) == napi_ok);
+    free(worker);
+  }
+
+  return result;
 }
 
 /*

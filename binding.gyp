@@ -12,7 +12,18 @@
     {
       "target_name": "liburkel",
       "type": "static_library",
-      "includes_dir": [
+      "sources": [
+        "./deps/liburkel/src/bits.c",
+        "./deps/liburkel/src/blake2b.c",
+        "./deps/liburkel/src/internal.c",
+        "./deps/liburkel/src/io.c",
+        "./deps/liburkel/src/nodes.c",
+        "./deps/liburkel/src/proof.c",
+        "./deps/liburkel/src/store.c",
+        "./deps/liburkel/src/tree.c",
+        "./deps/liburkel/src/util.c"
+      ],
+      "include_dirs": [
         "./deps/liburkel/include"
       ],
       "direct_dependent_settings": {
@@ -59,13 +70,21 @@
             4267, # implicit size_t demotion
             4334, # implicit 32->64 bit shift
             4996, # deprications
-          ]
+          ],
         }],
+        # ["OS == 'win'", {
+        #   "defines": ["_WIN32_WINNT=0x0501"],
+        #   "sources": [
+        #     "./deps/liburkel/src/io_win.c"
+        #   ]
+        # }],
+        # ["OS != 'win'", {
+        #   "sources": [
+        #     "./deps/liburkel/src/io_posix.c"
+        #   ]
+        # }],
         ["OS == 'linux'", {
           "defines": ["_POSIX_C_SOURCE=200112"]
-        }],
-        ["OS == 'win'", {
-          "defines": ["_WIN32_WINNT=0x0501"]
         }],
         ["tls_keyword != 'none'", {
           "defines": ["URKEL_TLS=<(tls_keyword)"]
@@ -75,7 +94,7 @@
     {
       "target_name": "nurkel",
       "dependencies": [
-        "liburkel"
+        "liburkel",
       ],
       "sources": [
         "./src/nurkel.c"
