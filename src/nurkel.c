@@ -166,6 +166,22 @@ nurkel_db_uninit(nurkel_tree_t *db) {
  * DB Init
  */
 
+static void nurkel_close_exec(napi_env env, void *data);
+
+static void
+nurkel_db_destroy_complete(napi_env env, napi_status status, void *data) {
+  nurkel_close_worker_t *worker = (nurkel_close_worker_t *)data;
+  nurkel_tree_t *ctx = (nurkel_tree_t *)worker->ctx;
+
+  ctx->is_closing = false;
+  ctx->is_opening = false;
+  ctx->is_open = false;
+
+  CHECK(napi_delete_async_work(env, worker->work) == napi_ok);
+  free(ctx);
+  free(worker);
+}
+
 /*
  * This is called when db variable goes out of scope and gets GCed. We need to
  * make sure on the JS side to always have DB in scope until it is being
@@ -175,17 +191,47 @@ nurkel_db_uninit(nurkel_tree_t *db) {
  */
 static void
 nurkel_db_destroy(napi_env env, void *data, void *hint) {
-  (void)env;
   (void)hint;
 
   if (data) {
     nurkel_tree_t *ctx = (nurkel_tree_t *)data;
 
-    /* TODO: close if its open */
+    if (ctx == NULL) {
+      free(ctx);
+      return;
+    }
 
-    /* DB Should be cleaned up by urkel_free */
-    CHECK(ctx->tree == NULL);
-    nurkel_db_uninit(ctx);
+    /* GC Started before open or close promise finished. We just crash. */
+    CHECK(!ctx->is_opening && !ctx->is_closing);
+
+    if (ctx->is_open) {
+      /* User forgot to clean up before ref got out of the scope . */
+      /* Make sure we do the clean up. */
+      napi_value workname;
+      CHECK(napi_create_string_latin1(env,
+                                      "db_destroy",
+                                      NAPI_AUTO_LENGTH,
+                                      &workname) == napi_ok);
+
+      nurkel_close_worker_t *worker = malloc(sizeof(nurkel_close_worker_t));
+      CHECK(worker != NULL);
+
+      worker->ctx = ctx;
+      worker->errno = 0;
+      worker->success = false;
+      CHECK(napi_create_async_work(env,
+                                   NULL,
+                                   workname,
+                                   nurkel_close_exec,
+                                   nurkel_db_destroy_complete,
+                                   worker,
+                                   &worker->work) == napi_ok);
+
+      CHECK(napi_queue_async_work(env, worker->work) == napi_ok);
+      return;
+    }
+
+    free(ctx);
   }
 }
 
@@ -372,7 +418,7 @@ static void
 nurkel_close_exec(napi_env env, void *data) {
   (void)env;
   nurkel_close_worker_t *worker = (nurkel_close_worker_t *)data;
-  nurkel_tree_t *ctx = worker->ctx;
+  nurkel_tree_t *ctx = (nurkel_tree_t *)worker->ctx;
 
   urkel_close(ctx->tree);
   ctx->tree = NULL;
@@ -477,9 +523,9 @@ nurkel_close(napi_env env, napi_callback_info info) {
 
 #ifndef NAPI_MODULE_INIT
 #define NAPI_MODULE_INIT()                                        \
-static napi_value bcrypto_init(napi_env env, napi_value exports); \
-NAPI_MODULE(NODE_GYP_MODULE_NAME, bcrypto_init)                   \
-static napi_value bcrypto_init(napi_env env, napi_value exports)
+static napi_value nurkel_init(napi_env env, napi_value exports); \
+NAPI_MODULE(NODE_GYP_MODULE_NAME, nurkel_init)                   \
+static napi_value nurkel_init(napi_env env, napi_value exports)
 #endif
 
 NAPI_MODULE_INIT() {
