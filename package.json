@@ -1,19 +1,28 @@
 {
   "name": "liburkel-node",
   "version": "0.0.0",
-  "description": "",
+  "description": "Liburkel bindings for node.js",
+  "license": "MIT",
+  "repository": "git://github.com/nodech/liburkel-node.git",
+  "homepage": "https://github.com/nodech/liburkel-node",
+  "bugs": {
+    "url": "https://github.com/nodech/liburkel-node/issues"
+  },
+
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "install": "node-gyp rebuild",
+    "lint": "eslint lib/ test/",
+    "test": "bmocha --reporter spec test/*-test.js"
   },
-  "author": "",
-  "license": "MIT",
+  "author": "Nodari Chkuaselidze <nodar.chkuaselidze@gmail.com>",
   "devDependencies": {
     "bmocha": "^2.1.6"
   },
   "engines": {
-    "node": ">=10.0.0"
+    "node": ">=12.0.0"
   },
+  "gypfile": true,
   "dependencies": {
     "bsert": "^0.0.10",
     "loady": "^0.0.5"

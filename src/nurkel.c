@@ -1,10 +1,19 @@
+/**
+ * nurkel.c - native bindings to liburkel
+ * Copyright (c) 2022, Nodari Chkuaselidze (MIT License)
+ * https://github.com/nodech/liburkel
+ */
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <urkel.h>
 #include <node_api.h>
+
+#define URKEL_HASH_SIZE 32
 
 #define JS_ERR_INIT "Failed to initialize."
 #define JS_ERR_NOT_IMPL "Not implemented."
@@ -62,6 +71,7 @@ static const int urkel_errors_len = 13;
 
 typedef struct nurkel_tree_s {
   urkel_t *tree;
+  unsigned char hash[URKEL_HASH_SIZE];
   napi_ref ref;
   bool is_open;
   bool is_opening;
@@ -75,6 +85,7 @@ typedef struct nurkel_tree_s {
 typedef struct nurkel_open_worker_s {
   void *ctx;
   char *path;
+  unsigned char hash[URKEL_HASH_SIZE];
   size_t path_len;
   int errno;
   bool success;
@@ -149,11 +160,6 @@ nurkel_db_init(nurkel_tree_t *db) {
   db->is_closing = false;
 }
 
-static void
-nurkel_db_uninit(nurkel_tree_t *db) {
-  free(db);
-}
-
 /*
  * NAPI for urkel.
  *
@@ -170,6 +176,7 @@ static void nurkel_close_exec(napi_env env, void *data);
 
 static void
 nurkel_db_destroy_complete(napi_env env, napi_status status, void *data) {
+  (void)status;
   nurkel_close_worker_t *worker = (nurkel_close_worker_t *)data;
   nurkel_tree_t *ctx = (nurkel_tree_t *)worker->ctx;
 
@@ -282,6 +289,7 @@ nurkel_open_exec(napi_env env, void *data) {
     return;
   }
 
+  urkel_root(ctx->tree, worker->hash);
   worker->success = true;
 }
 
@@ -313,7 +321,13 @@ nurkel_open_complete(napi_env env, napi_status status, void *data) {
 
   ctx->is_open = true;
   ctx->is_opening = false;
-  CHECK(napi_get_undefined(env, &result) == napi_ok);
+  memcpy(ctx->hash, worker->hash, URKEL_HASH_SIZE);
+
+  CHECK(napi_create_buffer_copy(env,
+                                URKEL_HASH_SIZE,
+                                ctx->hash,
+                                NULL,
+                                &result) == napi_ok);
   CHECK(napi_resolve_deferred(env, worker->deferred, result) == napi_ok);
   CHECK(napi_delete_async_work(env, worker->work) == napi_ok);
   free(worker->path);
@@ -357,6 +371,7 @@ nurkel_open(napi_env env, napi_callback_info info) {
   worker->path_len = 0;
   worker->errno = 0;
   worker->success = false;
+  memset(worker->hash, 0, URKEL_HASH_SIZE);
 
   status = read_value_string_latin1(env,
                                     argv[1],
