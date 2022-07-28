@@ -18,14 +18,15 @@
 #define JS_ERR_INIT "Failed to initialize."
 #define JS_ERR_NOT_IMPL "Not implemented."
 #define JS_ERR_ARG "Invalid argument."
+#define JS_ERR_ALLOC "Allocation failed."
+#define JS_ERR_NODE "Node internal error."
 #define JS_ERR_TREE_OPEN "Tree is already open."
 #define JS_ERR_TREE_CLOSED "Tree is closed."
 #define JS_ERR_TREE_NOTREADY "Tree is not ready."
 #define JS_ERR_TX_OPEN "Transaction is already open."
 #define JS_ERR_TX_CLOSED "Transaction is closed."
 #define JS_ERR_TX_NOTREADY "Transaction is not ready."
-#define JS_ERR_ALLOC "Allocation failed."
-#define JS_ERR_NODE "Node internal error."
+#define JS_ERR_TX_CLOSE_FAIL "Failed to start close worker."
 
 #define JS_ERR_URKEL_UNKNOWN "Unknown urkel error."
 #define JS_ERR_URKEL_OPEN "Urkel open failed."
@@ -895,7 +896,7 @@ nurkel_tx_close_complete(napi_env env, napi_status status, void *data) {
 }
 
 static napi_status
-nurkel_tx_close_(nurkel_tx_close_params_t params) {
+nurkel_tx_close_work(nurkel_tx_close_params_t params) {
   napi_value workname;
   napi_status status;
   nurkel_close_worker_t *worker;
@@ -960,11 +961,11 @@ static napi_value
 nurkel_tx_close(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value argv[1];
-  napi_value result, workname;
+  napi_value result;
   napi_status status;
   nurkel_tx_t *ntx = NULL;
   nurkel_tree_t *ntree = NULL;
-  nurkel_tx_close_worker_t *worker = NULL;
+  nurkel_tx_close_params_t params = {};
 
   status = napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
 
@@ -979,51 +980,14 @@ nurkel_tx_close(napi_env env, napi_callback_info info) {
   JS_ASSERT(nurkel_tx_ready(ntx), JS_ERR_TX_NOTREADY);
   JS_ASSERT(nurkel_tree_ready(ntree), JS_ERR_TREE_NOTREADY);
 
-  status = napi_create_string_latin1(env,
-                                     ASYNC_TX_CLOSE,
-                                     NAPI_AUTO_LENGTH,
-                                     &workname);
-  JS_ASSERT(status == napi_ok, JS_ERR_NODE);
+  params.env = env;
+  params.ntx = ntx;
+  params.promise = true;
+  params.promise_result = &result;
+  params.destroy = false;
 
-  worker = malloc(sizeof(nurkel_tx_close_worker_t));
-  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
-
-  WORKER_INIT(worker);
-  worker->ctx = ntx;
-  worker->destroy = false;
-
-  status = napi_create_promise(env, &worker->deferred, &result);
-  if (status != napi_ok) {
-    free(worker);
-    JS_THROW(JS_ERR_NODE);
-  }
-
-  status = napi_create_async_work(env,
-                                  NULL,
-                                  workname,
-                                  nurkel_tx_close_exec,
-                                  nurkel_tx_close_complete,
-                                  worker,
-                                  &worker->work);
-  if (status != napi_ok) {
-    free(worker);
-    JS_THROW(JS_ERR_NODE);
-  }
-
-  if (ntx->processing > 0) {
-    ntx->should_close = true;
-    ntx->close_worker = worker;
-    return result;
-  }
-
-  ntx->is_closing = true;
-  status = napi_queue_async_work(env, worker->work);
-
-  if (status != napi_ok) {
-    napi_delete_async_work(env, worker->work);
-    free(worker);
-    JS_THROW(JS_ERR_NODE);
-  }
+  status = nurkel_tx_close_work(params);
+  JS_ASSERT(status == napi_ok, JS_ERR_TX_CLOSE_FAIL);
 
   return result;
 }
