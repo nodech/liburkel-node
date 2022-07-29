@@ -13,7 +13,8 @@
   "scripts": {
     "install": "node-gyp rebuild",
     "lint": "eslint lib/ test/",
-    "test": "bmocha --reporter spec test/*-test.js"
+    "test": "bmocha --reporter spec test/*-test.js",
+    "test-gc": "node --expose-gc ./node_modules/.bin/bmocha --reporter spec test/*test.js"
   },
   "author": "Nodari Chkuaselidze <nodar.chkuaselidze@gmail.com>",
   "devDependencies": {

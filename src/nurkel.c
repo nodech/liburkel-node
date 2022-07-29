@@ -302,6 +302,7 @@ nurkel_tx_close_try_close(napi_env env, nurkel_tx_t *ntx) {
   if (ntx->workers > 0)
     return napi_ok;
 
+  CHECK(ntx->workers == 0);
   ntx->is_closing = true;
   close_worker = ntx->close_worker;
   return napi_queue_async_work(env, close_worker->work);
@@ -666,7 +667,7 @@ nurkel_close_work(nurkel_close_params_t *params) {
 
 /**
  * NAPI Call for closing tree.
- * This will wait indefintely if dependencies are not closed first???
+ * This will wait indefintely if dependencies are not closed first.
  */
 static napi_value
 nurkel_close(napi_env env, napi_callback_info info) {
@@ -675,7 +676,7 @@ nurkel_close(napi_env env, napi_callback_info info) {
   napi_value result;
   napi_status status;
   nurkel_tree_t *ntree = NULL;
-  nurkel_close_params_t params = {};
+  nurkel_close_params_t params;
 
   status = napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
   JS_ASSERT(status == napi_ok, JS_ERR_ARG);
@@ -730,7 +731,7 @@ nurkel_tx_destroy(napi_env env, void *data, void *hint) {
     return;
   }
 
-  if (ntx->is_open && ntx->is_opening) {
+  if (ntx->is_open || ntx->is_opening) {
     nurkel_tx_close_params_t params = {
       .env = env,
       .ctx = ntx,
@@ -807,14 +808,14 @@ nurkel_tx_open_exec(napi_env env, void *data) {
 
 static void
 nurkel_tx_open_complete(napi_env env, napi_status status, void *data) {
+  (void)status;
+
   nurkel_tx_open_worker_t *worker = data;
   nurkel_tx_t *ntx = worker->ctx;
   nurkel_tree_t *ntree = ntx->ntree;
   napi_value result;
 
   ntx->workers--;
-  /* TODO: Use UNREGISTER */
-  ntree->workers--;
 
   ntx->is_open = true;
   ntx->is_opening = false;
@@ -908,7 +909,7 @@ nurkel_tx_open(napi_env env, napi_callback_info info) {
     JS_THROW(JS_ERR_NODE);
   }
 
-  /* Make sure DB does not close and free while we are working with it. */
+  /* Make sure Tree does not close and free while we are working with it. */
   /* TODO: Use REGISTER. */
   ntree->workers++;
   ntx->is_opening = true;
@@ -1024,6 +1025,7 @@ nurkel_tx_close_work(nurkel_tx_close_params_t *params) {
     return napi_ok;
   }
 
+  CHECK(ntx->workers == 0);
   ntx->is_closing = true;
   status = napi_queue_async_work(params->env, worker->work);
 
@@ -1043,7 +1045,7 @@ nurkel_tx_close(napi_env env, napi_callback_info info) {
   napi_status status;
   nurkel_tx_t *ntx = NULL;
   nurkel_tree_t *ntree = NULL;
-  nurkel_tx_close_params_t params = {};
+  nurkel_tx_close_params_t params;
 
   status = napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
 
