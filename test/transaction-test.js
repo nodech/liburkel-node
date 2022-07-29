@@ -1,12 +1,13 @@
 'use strict';
 
 const path = require('path');
+const assert = require('bsert');
 const fs = require('fs');
 const {testdir, rmTreeDir, sleep} = require('./util/common');
 const {Tree} = require('../lib/tree');
 
-const SLEEP_BEFORE_GC = 200;
-const SLEEP_AFTER_GC = 200;
+const SLEEP_BEFORE_GC = 0;
+const SLEEP_AFTER_GC = 0;
 
 describe('Urkel Transaction', function () {
   if (!global.gc)
@@ -76,24 +77,56 @@ describe('Urkel Transaction', function () {
   });
 
   it('should close transaction when tree closes', async () => {
-    // TODO: Trigger close of related objects from the tree.
-    this.skip();
     await tree.open();
     const transaction = tree.transaction();
 
     await transaction.maybeOpen();
+    await tree.close();
+
+    await assert.rejects(async () => {
+      return await transaction.close();
+    }, {
+      message: 'Transaction is not ready.'
+    });
+  });
+
+  it('should close all transactions', async () => {
+    this.timeout(5000);
+    await tree.open();
+
+    const txns = [];
+
+    for (let i = 0; i < 10; i++) {
+      txns.push(tree.transaction());
+
+      // Open and wait 5.
+      if (i < 5) {
+        await txns[i].maybeOpen();
+      }
+
+      // wait close 2.
+      if (i < 2) {
+        await txns[i].close();
+      }
+
+      // don't wait close 2.
+      if (i >= 2 && i <= 3) {
+        txns[i].close();
+      }
+
+      // don't wait open >5
+      if (i >= 5)
+        txns[i].maybeOpen();
+    }
 
     await tree.close();
 
-    try {
-      await transaction.close();
-    } catch (e) {
-      console.error(e);
+    for (const tx of txns) {
+      await assert.rejects(async () => {
+        return await tx.close();
+      }, {
+        message: 'Transaction is not ready.'
+      });
     }
-    // await assert.rejects(async () => {
-    //   return await transaction.close();
-    // }, {
-    //   expect:
-    // });
   });
 });

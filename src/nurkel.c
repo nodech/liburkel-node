@@ -83,12 +83,26 @@ static const int urkel_errors_len = 13;
  * NAPI Context wrappers for the urkel.
  */
 
+typedef struct nurkel_tx_s nurkel_tx_t;
+
+typedef struct nurkel_tx_entry_s {
+  nurkel_tx_t *ntx;
+
+  struct nurkel_tx_entry_s *prev;
+  struct nurkel_tx_entry_s *next;
+} nurkel_tx_entry_t;
+
+
 typedef struct nurkel_tree_s {
   urkel_t *tree;
   unsigned char root[URKEL_HASH_SIZE];
   napi_ref ref;
   uint32_t workers;
   void *close_worker;
+
+  uint32_t tx_len;
+  nurkel_tx_entry_t *tx_head;
+
   bool is_open;
   bool is_opening;
   bool is_closing;
@@ -99,9 +113,10 @@ typedef struct nurkel_tree_s {
 typedef struct nurkel_tx_s {
   nurkel_tree_t *ntree;
   urkel_tx_t *tx;
-  unsigned char root[URKEL_HASH_SIZE];
+  nurkel_tx_entry_t *entry;
   uint32_t workers;
   void *close_worker;
+  unsigned char root[URKEL_HASH_SIZE];
   bool is_open;
   bool is_opening;
   bool is_closing;
@@ -213,6 +228,11 @@ read_value_string_latin1(napi_env env, napi_value value,
 }
 
 /*
+ * List helpers
+ */
+
+
+/*
  * Context wrapper init/deinit helpers.
  */
 
@@ -227,6 +247,11 @@ nurkel_ntree_init(nurkel_tree_t *ntree) {
   ntree->is_closing = false;
   ntree->should_close = false;
   ntree->should_cleanup = false;
+
+  // Init list
+  ntree->tx_len = 0;
+  ntree->tx_head = NULL;
+
   memset(ntree->root, 0, URKEL_HASH_SIZE);
 }
 
@@ -240,6 +265,7 @@ static void
 nurkel_ntx_init(nurkel_tx_t *ntx) {
   ntx->tx = NULL;
   ntx->ntree = NULL;
+  ntx->entry = NULL;
   ntx->close_worker = NULL;
   ntx->workers = 0;
   ntx->is_open = false;
@@ -254,6 +280,56 @@ static inline bool
 nurkel_tx_ready(nurkel_tx_t *ntx) {
   return ntx->is_open && !ntx->is_closing
     && !ntx->is_opening && !ntx->should_close;
+}
+
+static void
+nurkel_register_tx(nurkel_tx_t *ntx) {
+  nurkel_tree_t *ntree = ntx->ntree;
+  nurkel_tx_entry_t *entry = malloc(sizeof(nurkel_tx_entry_t));
+
+  CHECK(entry != NULL);
+
+  ntree->tx_len++;
+
+  entry->next = NULL;
+  entry->prev = NULL;
+  entry->ntx = ntx;
+
+  ntx->entry = entry;
+
+  if (ntree->tx_head == NULL) {
+    ntree->tx_head = entry;
+    return;
+  }
+
+  CHECK(ntree->tx_head->prev == NULL);
+
+  ntree->tx_head->prev = entry;
+  entry->next = ntree->tx_head;
+  ntree->tx_head = entry;
+}
+
+static void
+nurkel_unregister_tx(nurkel_tx_t *ntx) {
+  nurkel_tree_t *ntree = ntx->ntree;
+  nurkel_tx_entry_t *entry = ntx->entry;
+
+  CHECK(entry != NULL);
+  CHECK(ntree->tx_len > 0);
+
+  ntree->tx_len--;
+  ntx->entry = NULL;
+
+  if (ntree->tx_len == 0)
+    ntree->tx_head = NULL;
+
+  if (entry->prev != NULL)
+    entry->prev->next = entry->next;
+
+  if (entry->next != NULL)
+    entry->next->prev = entry->prev;
+
+  free(entry);
 }
 
 /*
@@ -277,11 +353,17 @@ nurkel_close_complete(napi_env env, napi_status status, void *data);
 static napi_status
 nurkel_close_work(nurkel_close_params_t *params);
 
+static napi_status
+nurkel_tx_close_work(nurkel_tx_close_params_t *params);
+
 static inline napi_status
 nurkel_close_try_close(napi_env env, nurkel_tree_t *ntree) {
   nurkel_close_worker_t *close_worker;
 
   if (!ntree->should_close)
+    return napi_ok;
+
+  if (ntree->tx_len > 0)
     return napi_ok;
 
   if (ntree->workers > 0)
@@ -321,6 +403,7 @@ nurkel_ntree_destroy(napi_env env, void *data, void *hint) {
 
   if (!data)
     return;
+
 
   nurkel_tree_t *ntree = data;
 
@@ -601,12 +684,34 @@ nurkel_close_complete(napi_env env, napi_status status, void *data) {
   free(worker);
 }
 
+static void
+nurkel_close_work_txs(nurkel_close_params_t *params) {
+  napi_env env = params->env;
+  nurkel_tree_t *ntree = params->ctx;
+  nurkel_tx_entry_t *head = ntree->tx_head;
+  nurkel_tx_close_params_t tx_params = {
+    .env = env,
+    .destroy = params->destroy,
+    .promise = false,
+    .promise_result = NULL
+  };
+
+  while (head != NULL) {
+    tx_params.ctx = head->ntx;
+    nurkel_tx_close_work(&tx_params);
+    head = head->next;
+  }
+}
+
 static napi_status
 nurkel_close_work(nurkel_close_params_t *params) {
   napi_value workname;
   napi_status status;
   nurkel_close_worker_t *worker;
   nurkel_tree_t *ntree = params->ctx;
+
+  if (ntree->is_closing || ntree->should_close)
+    return napi_ok;
 
   status = napi_create_string_latin1(params->env,
                                      ASYNC_CLOSE,
@@ -645,8 +750,8 @@ nurkel_close_work(nurkel_close_params_t *params) {
     return status;
   }
 
-  if (ntree->workers > 0 || ntree->is_opening) {
-    /* TODO: Run dependencies.close */
+  if (ntree->workers > 0 || ntree->tx_len > 0 || ntree->is_opening) {
+    nurkel_close_work_txs(params);
     ntree->should_close = true;
     ntree->close_worker = worker;
     return napi_ok;
@@ -703,9 +808,6 @@ nurkel_close(napi_env env, napi_callback_info info) {
 /*
  * Transaction related
  */
-
-static napi_status
-nurkel_tx_close_work(nurkel_tx_close_params_t *params);
 
 static void
 nurkel_tx_close_exec(napi_env env, void *data);
@@ -910,16 +1012,14 @@ nurkel_tx_open(napi_env env, napi_callback_info info) {
   }
 
   /* Make sure Tree does not close and free while we are working with it. */
-  /* TODO: Use REGISTER. */
-  ntree->workers++;
+  nurkel_register_tx(ntx);
   ntx->is_opening = true;
   ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
+    nurkel_unregister_tx(ntx);
     ntree->is_opening = false;
-    /* TODO: UNREGISTER */
-    ntree->workers--;
     ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
@@ -964,8 +1064,7 @@ nurkel_tx_close_complete(napi_env env, napi_status status, void *data) {
       NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-  /* TODO: Use unregister */
-  ntree->workers--;
+  nurkel_unregister_tx(ntx);
   nurkel_close_try_close(env, ntree);
 
   if (worker->destroy || ntx->should_cleanup)
@@ -979,6 +1078,9 @@ nurkel_tx_close_work(nurkel_tx_close_params_t *params) {
   napi_status status;
   nurkel_tx_close_worker_t *worker;
   nurkel_tx_t *ntx = params->ctx;
+
+  if (ntx->is_closing || ntx->should_close)
+    return napi_ok;
 
   status = napi_create_string_latin1(params->env,
                                      ASYNC_TX_CLOSE,
