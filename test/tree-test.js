@@ -6,7 +6,9 @@ const fs = require('fs');
 const {testdir, rmTreeDir, isTreeDir} = require('./util/common');
 const {Tree} = require('../lib/tree');
 
-describe('Urkel Open (GC)', function () {
+const NULL_HASH = Buffer.alloc(32, 0);
+
+describe('Urkel Tree', function () {
   if (!global.gc)
     this.skip();
 
@@ -67,5 +69,15 @@ describe('Urkel Open (GC)', function () {
 
     assert(isTreeDir(treeDir, true));
     global.gc();
+  });
+
+  it('should get tree root', async () => {
+    const tree = new Tree({prefix});
+
+    await tree.open();
+
+    assert.bufferEqual(tree.treeRootHashSync(), NULL_HASH);
+    assert.bufferEqual(await tree.treeRootHash(), NULL_HASH);
+    await tree.close();
   });
 });

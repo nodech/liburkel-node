@@ -6,6 +6,8 @@ const fs = require('fs');
 const {testdir, rmTreeDir} = require('./util/common');
 const {Tree} = require('../lib/tree');
 
+const NULL_HASH = Buffer.alloc(32, 0);
+
 describe('Urkel Transaction', function () {
   if (!global.gc)
     this.skip();
@@ -138,6 +140,17 @@ describe('Urkel Transaction', function () {
     })();
 
     global.gc();
+    await tree.close();
+  });
+
+  it('should get the root', async () => {
+    await tree.open();
+
+    const txn1 = tree.txn();
+    await txn1.maybeOpen();
+
+    assert.bufferEqual(txn1.txRootHashSync(), NULL_HASH);
+    assert.bufferEqual(await txn1.txRootHash(), NULL_HASH);
     await tree.close();
   });
 });
