@@ -3,11 +3,8 @@
 const path = require('path');
 const assert = require('bsert');
 const fs = require('fs');
-const {testdir, rmTreeDir, sleep} = require('./util/common');
+const {testdir, rmTreeDir} = require('./util/common');
 const {Tree} = require('../lib/tree');
-
-const SLEEP_BEFORE_GC = 0;
-const SLEEP_AFTER_GC = 0;
 
 describe('Urkel Transaction', function () {
   if (!global.gc)
@@ -37,7 +34,6 @@ describe('Urkel Transaction', function () {
       tree.transaction();
     }
     global.gc();
-    await sleep(SLEEP_AFTER_GC);
     await tree.close();
   });
 
@@ -60,18 +56,14 @@ describe('Urkel Transaction', function () {
       await transaction.maybeOpen();
     })();
 
-    await sleep(SLEEP_BEFORE_GC);
     global.gc();
-    await sleep(SLEEP_AFTER_GC);
     await (async () => {
       const transaction = tree.transaction();
       // Don't wait
       transaction.maybeOpen();
     })();
 
-    await sleep(SLEEP_BEFORE_GC);
     global.gc();
-    await sleep(SLEEP_AFTER_GC);
 
     await tree.close();
   });
@@ -91,7 +83,6 @@ describe('Urkel Transaction', function () {
   });
 
   it('should close all transactions', async () => {
-    this.timeout(5000);
     await tree.open();
 
     const txns = [];
@@ -128,5 +119,25 @@ describe('Urkel Transaction', function () {
         message: 'Transaction is not ready.'
       });
     }
+  });
+
+  it('should close tx and tree after out-of-scope', async () => {
+    await tree.open();
+
+    await (async () => {
+      for (let i = 0; i < 100; i++) {
+        const txn = await tree.txn();
+        await txn.maybeOpen();
+      }
+
+      for (let i = 0; i < 100; i++) {
+        const txn = await tree.txn();
+        await txn.maybeOpen();
+        txn.close();
+      }
+    })();
+
+    global.gc();
+    await tree.close();
   });
 });
