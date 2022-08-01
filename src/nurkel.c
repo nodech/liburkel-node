@@ -14,6 +14,7 @@
 #include <node_api.h>
 
 #define URKEL_HASH_SIZE 32
+#define URKEL_VALUE_SIZE 1023
 
 #define JS_ERR_INIT "Failed to initialize."
 #define JS_ERR_NOT_IMPL "Not implemented."
@@ -29,6 +30,7 @@
 #define JS_ERR_TX_CLOSED "Transaction is closed."
 #define JS_ERR_TX_NOTREADY "Transaction is not ready."
 #define JS_ERR_TX_CLOSE_FAIL "Failed to start close worker."
+#define JS_ERR_TX_COMMITTED "Transaction has already committed."
 
 #define JS_ERR_URKEL_UNKNOWN "Unknown urkel error."
 #define JS_ERR_URKEL_OPEN "Urkel open failed."
@@ -60,6 +62,8 @@
 } while (0)
 
 #define JS_ASSERT(cond, msg) if (!(cond)) JS_THROW(msg)
+/* #define JS_ASSERT(cond, msg) CHECK(cond) */
+#define JS_NAPI_OK(status, msg) JS_ASSERT(status == napi_ok, msg)
 
 /*
  * Urkel errors
@@ -148,6 +152,20 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
                                      NAPI_AUTO_LENGTH,                   \
                                      &workname) == napi_ok, JS_ERR_NODE)
 
+#define NURKEL_JS_KEY(arg, var) do {                            \
+  bool is_buffer;                                               \
+  uint8_t *buffer = NULL;                                       \
+  size_t buffer_len;                                            \
+  JS_NAPI_OK(napi_is_buffer(env, arg, &is_buffer), JS_ERR_ARG); \
+  JS_ASSERT(is_buffer == true, JS_ERR_ARG);                     \
+  JS_NAPI_OK(napi_get_buffer_info(env,                          \
+                                  arg,                          \
+                                  (void **)&buffer,             \
+                                  &buffer_len), JS_ERR_ARG);    \
+  JS_ASSERT(buffer_len == URKEL_HASH_SIZE, JS_ERR_ARG);         \
+  memcpy(var, buffer, URKEL_HASH_SIZE);                         \
+} while(0)
+
 /*
  * NAPI Context wrappers for the urkel.
  */
@@ -189,6 +207,8 @@ typedef struct nurkel_tx_s {
   bool is_open;
   bool is_opening;
   bool is_closing;
+  bool is_committing;
+  bool has_committed;
   bool should_close;
   bool should_cleanup;
 } nurkel_tx_t;
@@ -347,6 +367,8 @@ nurkel_ntx_init(nurkel_tx_t *ntx) {
   ntx->is_closing = false;
   ntx->should_close = false;
   ntx->should_cleanup = false;
+  ntx->is_committing = false;
+  ntx->has_committed = false;
   memset(ntx->root, 0, URKEL_HASH_SIZE);
 }
 
@@ -954,6 +976,133 @@ NURKEL_METHOD(root_hash) {
   return result;
 }
 
+NURKEL_METHOD(destroy_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(destroy) { */
+/* } */
+
+/* NURKEL_COMPLETE(destroy) { */
+/* } */
+
+NURKEL_METHOD(destroy) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(hash_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(hash) { */
+/* } */
+
+/* NURKEL_COMPLETE(hash) { */
+/* } */
+
+NURKEL_METHOD(hash) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(inject_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(inject) { */
+/* } */
+
+/* NURKEL_COMPLETE(inject) { */
+/* } */
+
+NURKEL_METHOD(inject) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(get_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(get) { */
+/* } */
+
+/* NURKEL_COMPLETE(get) { */
+/* } */
+
+NURKEL_METHOD(get) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(has_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(has) { */
+/* } */
+
+/* NURKEL_COMPLETE(has) { */
+/* } */
+
+NURKEL_METHOD(has) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(insert_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(insert) { */
+/* } */
+
+/* NURKEL_COMPLETE(insert) { */
+/* } */
+
+NURKEL_METHOD(insert) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(remove_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(remove) { */
+/* } */
+
+/* NURKEL_COMPLETE(remove) { */
+/* } */
+
+NURKEL_METHOD(remove) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(prove_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(prove) { */
+/* } */
+
+/* NURKEL_COMPLETE(prove) { */
+/* } */
+
+NURKEL_METHOD(prove) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+
+NURKEL_METHOD(verify_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(verify) { */
+/* } */
+
+/* NURKEL_COMPLETE(verify) { */
+/* } */
+
+NURKEL_METHOD(verify) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
 /*
  * Transaction related
  */
@@ -1295,6 +1444,7 @@ NURKEL_METHOD(tx_root_hash_sync) {
   NURKEL_TX_READY();
 
   urkel_tx_root(ntx->tx, hash);
+
   JS_ASSERT(napi_create_buffer_copy(env,
                                     URKEL_HASH_SIZE,
                                     hash,
@@ -1391,12 +1541,253 @@ NURKEL_METHOD(tx_root_hash) {
   return result;
 }
 
+NURKEL_METHOD(tx_get_sync) {
+  napi_value result;
+  bool is_buffer;
+  uint8_t *buffer = NULL;
+  size_t buffer_len = 0;
+  uint8_t key_hash[URKEL_HASH_SIZE];
+  uint8_t value[URKEL_VALUE_SIZE];
+  size_t value_len = 0;
+
+  NURKEL_ARGV(2);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+
+  JS_NAPI_OK(napi_is_buffer(env, argv[1], &is_buffer), JS_ERR_ARG);
+  JS_NAPI_OK(napi_get_buffer_info(env,
+                                  argv[1],
+                                  (void **)&buffer,
+                                  &buffer_len), JS_ERR_ARG);
+
+  JS_ASSERT(buffer_len == URKEL_HASH_SIZE, JS_ERR_ARG);
+  memcpy(key_hash, buffer, URKEL_HASH_SIZE);
+
+  if (!urkel_tx_get(ntx->tx, value, &value_len, key_hash))
+    JS_THROW(urkel_errors[urkel_errno - 1]);
+
+  JS_NAPI_OK(napi_create_buffer_copy(env,
+                                     value_len,
+                                     value,
+                                     NULL,
+                                     &result), JS_ERR_NODE);
+
+  return result;
+}
+
+/* NURKEL_EXEC(tx_get) { */
+/* } */
+
+/* NURKEL_COMPLETE(tx_get) { */
+/* } */
+
+NURKEL_METHOD(tx_get) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(tx_has_sync) {
+  napi_value result;
+  uint8_t key_buffer[URKEL_HASH_SIZE];
+  bool has_key = true;
+
+  NURKEL_ARGV(2);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+  NURKEL_JS_KEY(argv[1], key_buffer);
+
+  if (!urkel_tx_has(ntx->tx, key_buffer)) {
+    if (urkel_errno != URKEL_ENOTFOUND)
+      JS_THROW(urkel_errors[urkel_errno - 1]);
+
+    has_key = false;
+  }
+
+  JS_NAPI_OK(napi_get_boolean(env, has_key, &result), JS_ERR_NODE);
+  return result;
+}
+
+/* NURKEL_EXEC(tx_has) { */
+/* } */
+
+/* NURKEL_COMPLETE(tx_has) { */
+/* } */
+
+NURKEL_METHOD(tx_has) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(tx_insert_sync) {
+  napi_value result;
+  bool value_is_buffer;
+  uint8_t *val_buffer = NULL;
+  uint8_t key_buffer[URKEL_HASH_SIZE];
+  uint8_t value_buffer[URKEL_VALUE_SIZE];
+  size_t value_len = 0;
+
+  NURKEL_ARGV(3);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+  NURKEL_JS_KEY(argv[1], key_buffer);
+
+  JS_ASSERT(!ntx->has_committed || !ntx->is_committing, JS_ERR_TX_COMMITTED);
+  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
+  JS_NAPI_OK(napi_is_buffer(env, argv[2], &value_is_buffer), JS_ERR_ARG);
+  JS_ASSERT(value_is_buffer == true, JS_ERR_ARG);
+  JS_NAPI_OK(napi_get_buffer_info(env,
+                                  argv[2],
+                                  (void **)&val_buffer,
+                                  &value_len), JS_ERR_ARG);
+  JS_ASSERT(value_len <= URKEL_VALUE_SIZE, JS_ERR_ARG);
+  memcpy(value_buffer, val_buffer, value_len);
+
+  if (!urkel_tx_insert(ntx->tx, key_buffer, value_buffer, value_len))
+    JS_THROW(urkel_errors[urkel_errno - 1]);
+
+  return result;
+}
+
+/* NURKEL_EXEC(tx_insert) { */
+/* } */
+
+/* NURKEL_COMPLETE(tx_insert) { */
+/* } */
+
+NURKEL_METHOD(tx_insert) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(tx_remove_sync) {
+  napi_value result;
+  uint8_t key_buffer[URKEL_HASH_SIZE];
+
+  NURKEL_ARGV(2);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+  NURKEL_JS_KEY(argv[1], key_buffer);
+
+  JS_ASSERT(!ntx->has_committed || !ntx->is_committing, JS_ERR_TX_COMMITTED);
+  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
+
+  if (!urkel_tx_remove(ntx->tx, key_buffer))
+    JS_THROW(urkel_errors[urkel_errno - 1]);
+
+  return result;
+}
+
+/* NURKEL_EXEC(tx_remove) { */
+/* } */
+
+/* NURKEL_COMPLETE(tx_remove) { */
+/* } */
+
+NURKEL_METHOD(tx_remove) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(tx_prove_sync) {
+  napi_value result;
+  uint8_t key_buffer[URKEL_HASH_SIZE];
+  uint8_t *proof_raw = NULL;
+  size_t proof_len;
+  napi_status status;
+
+  NURKEL_ARGV(2);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+  NURKEL_JS_KEY(argv[1], key_buffer);
+
+  if (!urkel_tx_prove(ntx->tx, &proof_raw, &proof_len, key_buffer))
+    JS_THROW(urkel_errors[urkel_errno - 1]);
+
+  /* NOTE: proof_raw is allocated by urkel_tx_prove */
+  /* and will be deallocated by the Node.js */
+  status = napi_create_buffer(env, proof_len, (void **)&proof_raw, &result);
+
+  if (status != napi_ok) {
+    free(proof_raw);
+    JS_THROW(JS_ERR_NODE);
+  }
+
+  return result;
+}
+
+/* NURKEL_EXEC(tx_prove) { */
+/* } */
+
+/* NURKEL_COMPLETE(tx_prove) { */
+/* } */
+
+NURKEL_METHOD(tx_prove) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(tx_commit_sync) {
+  napi_value result;
+
+  NURKEL_ARGV(1);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+
+  JS_ASSERT(!ntx->has_committed || !ntx->is_committing, JS_ERR_TX_COMMITTED);
+  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
+
+  ntx->is_committing = true;
+  if (!urkel_tx_commit(ntx->tx)) {
+    ntx->is_committing = false;
+    JS_THROW(urkel_errors[urkel_errno - 1]);
+  }
+
+  ntx->is_committing = false;
+  ntx->has_committed = true;
+
+  return result;
+}
+
+/* NURKEL_EXEC(tx_commit) { */
+/* } */
+
+/* NURKEL_COMPLETE(tx_commit) { */
+/* } */
+
+NURKEL_METHOD(tx_commit) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(tx_clear_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(tx_clear) { */
+/* } */
+
+/* NURKEL_COMPLETE(tx_clear) { */
+/* } */
+
+NURKEL_METHOD(tx_clear) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+NURKEL_METHOD(tx_inject_sync) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+/* NURKEL_EXEC(tx_inject) { */
+/* } */
+
+/* NURKEL_COMPLETE(tx_inject) { */
+/* } */
+
+NURKEL_METHOD(tx_inject) {
+  JS_THROW(JS_ERR_NOT_IMPL);
+}
+
+
 /*
  * Module
  */
 
 #ifndef NAPI_MODULE_INIT
-#define NAPI_MODULE_INIT()                                        \
+#define NAPI_MODULE_INIT()                                       \
 static napi_value nurkel_init(napi_env env, napi_value exports); \
 NAPI_MODULE(NODE_GYP_MODULE_NAME, nurkel_init)                   \
 static napi_value nurkel_init(napi_env env, napi_value exports)
@@ -1413,13 +1804,49 @@ NAPI_MODULE_INIT() {
     F(init),
     F(open),
     F(close),
-    F(root_hash),
     F(root_hash_sync),
+    F(root_hash),
+    F(destroy_sync),
+    F(destroy),
+    F(hash_sync),
+    F(hash),
+    F(inject_sync),
+    F(inject),
+    F(get_sync),
+    F(get),
+    F(has_sync),
+    F(has),
+    F(insert_sync),
+    F(insert),
+    F(remove_sync),
+    F(remove),
+    F(prove_sync),
+    F(prove),
+    F(verify_sync),
+    F(verify),
+
+    /* TX Methods */
     F(tx_init),
     F(tx_open),
     F(tx_close),
     F(tx_root_hash),
-    F(tx_root_hash_sync)
+    F(tx_root_hash_sync),
+    F(tx_get_sync),
+    F(tx_get),
+    F(tx_has_sync),
+    F(tx_has),
+    F(tx_insert_sync),
+    F(tx_insert),
+    F(tx_remove_sync),
+    F(tx_remove),
+    F(tx_prove_sync),
+    F(tx_prove),
+    F(tx_commit_sync),
+    F(tx_commit),
+    F(tx_clear_sync),
+    F(tx_clear),
+    F(tx_inject_sync),
+    F(tx_inject)
 #undef F
   };
 

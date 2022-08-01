@@ -70,3 +70,7 @@ common.rmTreeDir = (dir) => {
 common.sleep = async (ms) => {
   return new Promise(r => setTimeout(r, ms));
 };
+
+common.randomKey = () => {
+  return randomBytes(32);
+};
