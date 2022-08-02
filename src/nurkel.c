@@ -16,25 +16,17 @@
 #define URKEL_HASH_SIZE 32
 #define URKEL_VALUE_SIZE 1023
 
+#define ERR_UNKNOWN "ERR_UNKNOWN"
+
 #define JS_ERR_INIT "Failed to initialize."
 #define JS_ERR_NOT_IMPL "Not implemented."
 #define JS_ERR_ARG "Invalid argument."
 #define JS_ERR_ALLOC "Allocation failed."
 #define JS_ERR_NODE "Node internal error."
+#define JS_ERR_UNKNOWN "Unknown internal error."
 
-#define JS_ERR_TREE_OPEN "Tree is already open."
-#define JS_ERR_TREE_CLOSED "Tree is closed."
-#define JS_ERR_TREE_NOTREADY "Tree is not ready."
-
-#define JS_ERR_TX_OPEN "Transaction is already open."
-#define JS_ERR_TX_CLOSED "Transaction is closed."
-#define JS_ERR_TX_NOTREADY "Transaction is not ready."
-#define JS_ERR_TX_CLOSE_FAIL "Failed to start close worker."
 #define JS_ERR_TX_COMMITTED "Transaction has already committed."
 
-#define JS_ERR_URKEL_UNKNOWN "Unknown urkel error."
-#define JS_ERR_URKEL_OPEN "Urkel open failed."
-#define JS_ERR_URKEL_CLOSE "Urkel close failed."
 #define JS_ERR_URKEL_DESTROY "Urkel destroy failed."
 
 #define CHECK(expr) do {                           \
@@ -137,11 +129,11 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
   ntree = ntx->ntree
 
 #define NURKEL_TREE_READY()                                 \
-  JS_ASSERT(nurkel_tree_ready(ntree), JS_ERR_TREE_NOTREADY)
+  JS_ASSERT(nurkel_tree_ready(ntree), "Tree is not ready.")
 
-#define NURKEL_TX_READY()                                   \
-  JS_ASSERT(nurkel_tx_ready(ntx), JS_ERR_TX_NOTREADY);      \
-  JS_ASSERT(nurkel_tree_ready(ntree), JS_ERR_TREE_NOTREADY)
+#define NURKEL_TX_READY()                                       \
+  JS_ASSERT(nurkel_tx_ready(ntx), "Transaction is not ready."); \
+  JS_ASSERT(nurkel_tree_ready(ntree), "Tree is not ready.")
 
 /* This needs to be before we have anything to free */
 #define NURKEL_JS_WORKNAME(name)                                          \
@@ -349,26 +341,38 @@ napi_status
 nurkel_create_error(napi_env env, int errno, char *msg, napi_value *result) {
   napi_status status;
   napi_value nmsg, ncode;
+  bool has_errno = false;
 
-  if (errno < 1 || errno > urkel_errors_len)
-    return napi_generic_failure;
+  if (errno > 0 && errno <= urkel_errors_len) {
+    has_errno = true;
+    status = napi_create_string_latin1(env,
+                                       urkel_errors[errno - 1],
+                                       NAPI_AUTO_LENGTH,
+                                       &ncode);
+  } else {
+    status = napi_create_string_latin1(env,
+                                       ERR_UNKNOWN,
+                                       NAPI_AUTO_LENGTH,
+                                       &ncode);
+  }
 
-  status = napi_create_string_latin1(env,
-                                     urkel_errors[errno - 1],
-                                     NAPI_AUTO_LENGTH,
-                                     &ncode);
   if (status != napi_ok)
     return status;
 
   if (msg != NULL) {
     status = napi_create_string_latin1(env, msg, NAPI_AUTO_LENGTH, &nmsg);
-
-    if (status != napi_ok)
-      return status;
+  } else if (!has_errno) {
+    status = napi_create_string_latin1(env,
+                                       JS_ERR_UNKNOWN,
+                                       NAPI_AUTO_LENGTH,
+                                       &nmsg);
   } else {
     nmsg = ncode;
     ncode = NULL;
   }
+
+  if (status != napi_ok)
+    return status;
 
   return napi_create_error(env, ncode, nmsg, result);
 }
@@ -684,7 +688,7 @@ NURKEL_COMPLETE(open) {
 
     NAPI_OK(nurkel_create_error(env,
                                 worker->errno,
-                                JS_ERR_URKEL_OPEN,
+                                "Urkel open failed.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
     goto cleanup;
@@ -721,8 +725,8 @@ NURKEL_METHOD(open) {
   NURKEL_ARGV(2);
   NURKEL_TREE_CONTEXT();
 
-  JS_ASSERT(!ntree->is_open && !ntree->is_opening, JS_ERR_TREE_OPEN);
-  JS_ASSERT(!ntree->is_closing, JS_ERR_TREE_CLOSED);
+  JS_ASSERT(!ntree->is_open && !ntree->is_opening, "Tree is already open.");
+  JS_ASSERT(!ntree->is_closing, "Tree is closing.");
 
   worker = malloc(sizeof(nurkel_open_worker_t));
   if (worker == NULL) {
@@ -900,12 +904,17 @@ NURKEL_COMPLETE(close) {
   NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (worker->deferred != NULL) {
-    NAPI_OK(napi_get_undefined(env, &result));
 
-    if (status != napi_ok)
+    if (status != napi_ok || worker->success == false) {
+      NAPI_OK(nurkel_create_error(env,
+                                  worker->errno,
+                                  "Failed to close.",
+                                  &result));
       NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-    else
+    } else {
+      NAPI_OK(napi_get_undefined(env, &result));
       NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+    }
   }
 
   if (worker->destroy || ntree->should_cleanup)
@@ -979,7 +988,10 @@ NURKEL_COMPLETE(root_hash) {
   NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (!worker->success || status != napi_ok) {
-    NAPI_OK(napi_get_undefined(env, &result));
+    NAPI_OK(nurkel_create_error(env,
+                                worker->errno,
+                                "Failed to get root_hash.",
+                                &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
     free(worker);
     return;
@@ -1370,9 +1382,9 @@ NURKEL_METHOD(tx_open) {
   JS_ASSERT(ntx != NULL, JS_ERR_ARG);
 
   JS_ASSERT(!ntx->is_open && !ntx->is_opening && !ntx->is_closing,
-            JS_ERR_TX_OPEN);
-  JS_ASSERT(nurkel_tree_ready(ntx->ntree), JS_ERR_TREE_CLOSED);
+            "Transaction is already open.");
   ntree = ntx->ntree;
+  NURKEL_TREE_READY();
 
   status = napi_typeof(env, argv[1], &type);
   JS_ASSERT(status == napi_ok, JS_ERR_ARG);
@@ -1514,12 +1526,18 @@ NURKEL_COMPLETE(tx_close) {
   NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (worker->deferred != NULL) {
-    NAPI_OK(napi_get_undefined(env, &result));
 
-    if (status != napi_ok)
+    if (status != napi_ok) {
+      NAPI_OK(nurkel_create_error(env,
+                                  worker->errno,
+                                  "Failed to close tx.",
+                                  &result));
       NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-    else
+    }
+    else {
+      NAPI_OK(napi_get_undefined(env, &result));
       NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+    }
   }
 
   nurkel_unregister_tx(ntx);
@@ -1546,7 +1564,7 @@ NURKEL_METHOD(tx_close) {
   params.destroy = false;
 
   status = nurkel_tx_close_work(&params);
-  JS_ASSERT(status == napi_ok, JS_ERR_TX_CLOSE_FAIL);
+  JS_ASSERT(status == napi_ok, "Failed to start close worker.");
 
   return result;
 }
@@ -1593,7 +1611,10 @@ NURKEL_COMPLETE(tx_root_hash) {
   NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (!worker->success || status != napi_ok) {
-    NAPI_OK(napi_get_undefined(env, &result));
+    NAPI_OK(nurkel_create_error(env,
+                                worker->errno,
+                                "Failed to get tx_root_hash.",
+                                &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
     free(worker);
     return;
