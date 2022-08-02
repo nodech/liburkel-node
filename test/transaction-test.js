@@ -61,39 +61,4 @@ describe('Urkel Transaction', function () {
       message: 'URKEL_ENOTFOUND'
     });
   });
-
-  it('should test memory leak for proof', async () => {
-    const txn1 = tree.txn();
-    await txn1.maybeOpen();
-    const keys = [];
-
-    global.gc();
-    await (async () => {
-      for (let i = 0; i < 100; i++) {
-        const key = randomKey();
-        const val = randomKey();
-
-        txn1.insertSync(key, val);
-        keys.push(key);
-      }
-    })();
-
-    // console.log(process.memoryUsage());
-    global.gc();
-    await (async () => {
-      const proofs = [];
-      for (const [i, key] of keys.entries()) {
-        const proof = txn1.proveSync(key);
-        proofs.push(proof);
-        delete keys[i];
-      }
-
-      // console.log(process.memoryUsage());
-      global.gc();
-    })();
-    // await sleep(1000);
-
-    global.gc();
-    // console.log(process.memoryUsage());
-  });
 });

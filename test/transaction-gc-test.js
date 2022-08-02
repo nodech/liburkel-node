@@ -3,7 +3,7 @@
 const path = require('path');
 const assert = require('bsert');
 const fs = require('fs');
-const {testdir, rmTreeDir} = require('./util/common');
+const {testdir, rmTreeDir, randomKey} = require('./util/common');
 const {Tree} = require('../lib/tree');
 
 describe('Urkel Transaction (GC)', function () {
@@ -112,12 +112,22 @@ describe('Urkel Transaction (GC)', function () {
 
     await tree.close();
 
-    for (const tx of txns) {
-      await assert.rejects(async () => {
-        return await tx.close();
-      }, {
-        message: 'Transaction is not ready.'
-      });
+    for (let i = 0; i < 10; i++) {
+      const tx = txns[i];
+      let err;
+
+      try {
+        await tx.close();
+      } catch (e) {
+        err = e;
+      }
+
+      assert(err, 'tx close should throw an error.');
+
+      if (i <= 3)
+        assert.strictEqual(err.message, 'Transaction is not open.');
+      else
+        assert.strictEqual(err.message, 'Transaction is not ready.');
     }
   });
 
@@ -138,6 +148,52 @@ describe('Urkel Transaction (GC)', function () {
     })();
 
     global.gc();
+    await tree.close();
+  });
+
+  it('should test memory leak for proof', async () => {
+    await tree.open();
+
+    const txn1 = tree.txn();
+    await txn1.maybeOpen();
+    const keys = [];
+    global.gc();
+    let lastUsage = process.memoryUsage();
+    let usage = null;
+
+    global.gc();
+    await (async () => {
+      for (let i = 0; i < 100; i++) {
+        const key = randomKey();
+        const val = randomKey();
+
+        txn1.insertSync(key, val);
+        keys.push(key);
+      }
+    })();
+
+    global.gc();
+    usage = process.memoryUsage();
+    assert(lastUsage.external < usage.external);
+    assert(lastUsage.arrayBuffers < usage.arrayBuffers);
+    lastUsage = usage;
+    await (async () => {
+      const proofs = [];
+      for (const [i, key] of keys.entries()) {
+        const proof = txn1.proveSync(key);
+        proofs.push(proof);
+        delete keys[i];
+      }
+
+      usage = process.memoryUsage();
+      assert(lastUsage.arrayBuffers < usage.arrayBuffers);
+      lastUsage = usage;
+    })();
+
+    global.gc();
+    usage = process.memoryUsage();
+    assert(lastUsage.arrayBuffers > usage.arrayBuffers);
+
     await tree.close();
   });
 });
