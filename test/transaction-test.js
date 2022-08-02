@@ -42,13 +42,14 @@ describe('Urkel Transaction', function () {
 
   it('should insert and get the key (sync)', async () => {
     const txn1 = tree.txn();
-    await txn1.maybeOpen();
+    await txn1.open();
 
     const key1 = randomKey();
     const value = Buffer.from('Hello !');
 
     assert.strictEqual(txn1.hasSync(key1), false);
     txn1.insertSync(key1, value);
+
     assert.strictEqual(txn1.hasSync(key1), true);
     const resValue = txn1.getSync(key1);
     assert.bufferEqual(resValue, value);
@@ -58,7 +59,36 @@ describe('Urkel Transaction', function () {
     assert.throws(() => {
       txn1.getSync(key1);
     }, {
-      message: 'URKEL_ENOTFOUND'
+      code: 'URKEL_ENOTFOUND',
+      message: 'Failed to tx get key.'
     });
+
+    await txn1.close();
+  });
+
+  it('should insert and get the key', async () => {
+    const txn1 = tree.txn();
+    await txn1.open();
+
+    const key1 = randomKey();
+    const value = Buffer.from('Hello !');
+
+    assert.strictEqual(await txn1.has(key1), false);
+    await txn1.insert(key1, value);
+
+    assert.strictEqual(await txn1.has(key1), true);
+    const resValue = await txn1.get(key1);
+    assert.bufferEqual(resValue, value);
+    await txn1.remove(key1);
+    assert.strictEqual(await txn1.has(key1), false);
+
+    await assert.rejects(async () => {
+      await txn1.get(key1);
+    }, {
+      code: 'URKEL_ENOTFOUND',
+      message: 'Failed to tx get key.'
+    });
+
+    await txn1.close();
   });
 });
