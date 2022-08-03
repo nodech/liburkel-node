@@ -256,6 +256,12 @@ typedef struct nurkel_get_worker_s {
   size_t value_len;
 } nurkel_get_worker_t;
 
+typedef struct nurkel_has_worker_s {
+  WORKER_BASE_PROPS
+  uint8_t key[URKEL_HASH_SIZE];
+  bool has_key;
+} nurkel_has_worker_t;
+
 /* Transaction workers */
 
 typedef struct nurkel_tx_open_worker_s {
@@ -1259,7 +1265,7 @@ NURKEL_METHOD(get_sync) {
                                     false), JS_ERR_ARG);
 
   if (!urkel_get(ntree->tree, value, &value_len, key, NULL))
-    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to get key.");
+    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to get.");
 
   JS_NAPI_OK(napi_create_buffer_copy(env,
                                      value_len,
@@ -1302,7 +1308,7 @@ NURKEL_COMPLETE(get) {
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
                                 worker->errno,
-                                "Failed to get key.",
+                                "Failed to get.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
   } else {
@@ -1366,17 +1372,121 @@ NURKEL_METHOD(get) {
 }
 
 NURKEL_METHOD(has_sync) {
-  JS_THROW(JS_ERR_NOT_IMPL);
+  napi_value result;
+  uint8_t key[URKEL_HASH_SIZE];
+  bool has_key = true;
+
+  NURKEL_ARGV(2);
+  NURKEL_TREE_CONTEXT();
+  NURKEL_TREE_READY();
+
+  JS_NAPI_OK(nurkel_get_buffer_copy(env,
+                                    argv[1],
+                                    key,
+                                    NULL,
+                                    URKEL_HASH_SIZE,
+                                    false), JS_ERR_ARG);
+
+  if (!urkel_has(ntree->tree, key, NULL)) {
+    if (urkel_errno != URKEL_ENOTFOUND)
+      JS_THROW(urkel_errors[urkel_errno - 1]);
+
+    has_key = false;
+  }
+
+  JS_NAPI_OK(napi_get_boolean(env, has_key, &result), JS_ERR_NODE);
+  return result;
 }
 
-/* NURKEL_EXEC(has) { */
-/* } */
+NURKEL_EXEC(has) {
+  (void)env;
 
-/* NURKEL_COMPLETE(has) { */
-/* } */
+  nurkel_has_worker_t *worker = data;
+  nurkel_tree_t *ntree = worker->ctx;
+
+  if (!urkel_has(ntree->tree, worker->key, NULL)) {
+    if (urkel_errno != URKEL_ENOTFOUND) {
+      worker->errno = urkel_errno;
+      worker->success = false;
+      return;
+    }
+
+    worker->has_key = false;
+    worker->success = true;
+    return;
+  }
+
+  worker->has_key = true;
+  worker->success = true;
+}
+
+NURKEL_COMPLETE(has) {
+  napi_value result;
+  nurkel_has_worker_t *worker = data;
+  nurkel_tree_t *ntree = worker->ctx;
+  ntree->workers--;
+
+  NAPI_OK(napi_delete_async_work(env, worker->work));
+
+  if (status != napi_ok || worker->success == false) {
+    NAPI_OK(nurkel_create_error(env,
+                                worker->errno,
+                                "Failed to has.",
+                                &result));
+    NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+  } else {
+    NAPI_OK(napi_get_boolean(env, worker->has_key, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  }
+
+  NAPI_OK(nurkel_close_try_close(env, ntree));
+  free(worker);
+}
 
 NURKEL_METHOD(has) {
-  JS_THROW(JS_ERR_NOT_IMPL);
+  napi_value result;
+  napi_status status;
+  nurkel_has_worker_t *worker;
+
+  NURKEL_ARGV(2);
+  NURKEL_TREE_CONTEXT();
+  NURKEL_TREE_READY();
+
+  worker = malloc(sizeof(nurkel_has_worker_t));
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
+  WORKER_INIT(worker);
+  worker->ctx = ntree;
+
+  status = nurkel_get_buffer_copy(env,
+                                  argv[1],
+                                  worker->key,
+                                  NULL,
+                                  URKEL_HASH_SIZE,
+                                  false);
+
+  if (status != napi_ok) {
+    free(worker);
+    JS_THROW(JS_ERR_ARG);
+  }
+
+  NURKEL_CREATE_ASYNC_WORK(has, worker, result);
+
+  if (status != napi_ok) {
+    free(worker);
+    JS_THROW(JS_ERR_NODE);
+  }
+
+  ntree->workers++;
+  status = napi_queue_async_work(env, worker->work);
+
+  if (status != napi_ok) {
+    ntree->workers--;
+    napi_delete_async_work(env, worker->work);
+    free(worker);
+    JS_THROW(JS_ERR_NODE);
+  }
+
+  return result;
 }
 
 NURKEL_METHOD(insert_sync) {
@@ -2062,13 +2172,11 @@ NURKEL_COMPLETE(tx_has) {
                                 "Failed to tx has.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-    NAPI_OK(nurkel_tx_close_try_close(env, ntx));
-    free(worker);
-    return;
+  } else {
+    NAPI_OK(napi_get_boolean(env, worker->has_key, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-  NAPI_OK(napi_get_boolean(env, worker->has_key, &result));
-  NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
 }

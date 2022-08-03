@@ -86,7 +86,7 @@ describe('Urkel Transaction', function () {
       await txn1.get(key1);
     }, {
       code: 'URKEL_ENOTFOUND',
-      message: 'Failed to tx get key.'
+      message: 'Failed to tx get.'
     });
 
     await txn1.close();

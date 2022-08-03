@@ -137,8 +137,20 @@ describe('Urkel Tree', function () {
 
       assert.bufferEqual(valueS, origValue);
       assert.bufferEqual(value, origValue);
+      assert.strictEqual(tree.hasSync(keys[i]), true);
+      assert.strictEqual(await tree.has(keys[i]), true);
     }
 
-    await tree.get(randomKey());
+    assert.throws(() => {
+      tree.getSync(randomKey());
+    }, {
+      code: 'URKEL_ENOTFOUND',
+      message: 'Failed to get.'
+    });
+
+    await assert.rejects(tree.get(randomKey()), {
+      code: 'URKEL_ENOTFOUND',
+      message: 'Failed to get.'
+    });
   });
 });
