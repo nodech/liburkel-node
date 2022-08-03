@@ -153,4 +153,88 @@ describe('Urkel Tree', function () {
       message: 'Failed to get.'
     });
   });
+
+  it.only('should get proof', async () => {
+    const keys = [];
+    const values = [];
+    const proofs = [];
+    const treeProofs = [];
+    const treeProofsSync = [];
+    const roots = [];
+
+    for (let i = 0; i < 5; i++) {
+      const txn = tree.txn();
+      await txn.open();
+
+      for (let j = 0; j < 5; j++) {
+        const key = randomKey();
+        const value = Buffer.from(`Value: ${i}.${j}.`);
+
+        await txn.insert(key, value);
+        keys[i * 5 + j] = key;
+        values[i * 5 + j] = value;
+      }
+
+      for (let j = 0; j < 5; j++) {
+        const key = keys[i * 5 + j];
+        const proof = await txn.prove(key);
+        proofs[i * 5 + j] = proof;
+      }
+
+      await txn.commit();
+
+      for (let j = 0; j < 5; j++) {
+        const key = keys[i * 5 + j];
+        treeProofsSync[i * 5 + j] = tree.proveSync(key);;
+        treeProofs[i * 5 + j] = await tree.prove(key);
+        roots.push(tree.rootHash());
+      }
+    }
+
+    let err = null;
+    try {
+      Tree.verifySync(proofs[0], keys[1], roots[0]);
+    } catch (e) {
+      err = e;
+    }
+
+    assert(err, 'Tree.verifySync should throw.');
+    assert.strictEqual(err.message, 'Failed to verify_sync.');
+    assert.strictEqual(err.code, 'URKEL_EHASHMISMATCH');
+
+    err = null;
+    try {
+      await Tree.verify(proofs[0], keys[1], roots[0]);
+    } catch (e) {
+      err = e;
+    }
+
+    assert(err, 'Tree.verify should throw.');
+    assert.strictEqual(err.message, 'Failed to verify.');
+    assert.strictEqual(err.code, 'URKEL_EHASHMISMATCH');
+
+    await assert.rejects(Tree.verify(proofs[0], keys[1], roots[0]), {
+      code: 'URKEL_EHASHMISMATCH',
+      message: 'Failed to verify.'
+    });
+
+    for (let i = 0; i < keys.length; i++) {
+      const origValue = values[i];
+      const root = roots[i];
+      const proof = proofs[i];
+      const treeProofSync = treeProofsSync[i];
+      const treeProof = treeProofs[i];
+
+      assert.bufferEqual(treeProofSync, proof);
+      assert.bufferEqual(treeProof, proof);
+
+      const [exitsSync, valueSync] = Tree.verifySync(proof, keys[i], root);
+      const [exits, value] = await Tree.verify(proof, keys[i], root);
+
+      assert.strictEqual(exitsSync, true);
+      assert.strictEqual(exits, true);
+      assert.bufferEqual(valueSync, origValue);
+      assert.bufferEqual(value, origValue);
+    }
+  });
 });
