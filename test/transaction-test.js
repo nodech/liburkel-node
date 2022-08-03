@@ -3,7 +3,7 @@
 const path = require('path');
 const assert = require('bsert');
 const fs = require('fs');
-const {testdir, rmTreeDir, randomKey, sleep} = require('./util/common');
+const {testdir, rmTreeDir, randomKey} = require('./util/common');
 const {Tree} = require('../lib/tree');
 
 const NULL_HASH = Buffer.alloc(32, 0);
@@ -88,6 +88,31 @@ describe('Urkel Transaction', function () {
       code: 'URKEL_ENOTFOUND',
       message: 'Failed to tx get key.'
     });
+
+    await txn1.close();
+  });
+
+  it('should generate proofs', async () => {
+    const txn1 = tree.txn();
+    await txn1.open();
+
+    const pairs = new Map();
+
+    for (let i = 0; i < 10; i++) {
+      const key = randomKey();
+      const value = Buffer.from(`Hello ${i}.`);
+
+      pairs.set(key.toString('hex'), value);
+      await txn1.insert(key, value);
+    }
+
+    for (const keyHex of pairs.keys()) {
+      const key = Buffer.from(keyHex, 'hex');
+      const proof = await txn1.prove(key);
+      const proofS = txn1.proveSync(key);
+
+      assert.bufferEqual(proof, proofS);
+    }
 
     await txn1.close();
   });

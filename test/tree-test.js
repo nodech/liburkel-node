@@ -3,7 +3,7 @@
 const path = require('path');
 const assert = require('bsert');
 const fs = require('fs');
-const {testdir, rmTreeDir} = require('./util/common');
+const {testdir, rmTreeDir, randomKey} = require('./util/common');
 const {Tree} = require('../lib/tree');
 
 const NULL_HASH = Buffer.alloc(32, 0);
@@ -109,5 +109,36 @@ describe('Urkel Tree', function () {
     await Tree.destroy(treeDir);
     assert.strictEqual(fs.existsSync(treeDir), false);
     fs.rmdirSync(prefix);
+  });
+
+  it('should get values', async () => {
+    const txn = tree.txn();
+    const keys = [];
+    const values = [];
+    await txn.open();
+
+    for (let i = 0; i < 10; i++) {
+      const key = randomKey();
+      const value = Buffer.from(`value ${i}.`);
+
+      keys[i] = key;
+      values[i] = value;
+
+      await txn.insert(key, value);
+    }
+
+    await txn.commit();
+    await txn.close();
+
+    for (let i = 0; i < 10; i++) {
+      const origValue = values[i];
+      const valueS = tree.getSync(keys[i]);
+      const value = await tree.get(keys[i]);
+
+      assert.bufferEqual(valueS, origValue);
+      assert.bufferEqual(value, origValue);
+    }
+
+    await tree.get(randomKey());
   });
 });
