@@ -38,9 +38,9 @@
     nurkel_assert_fail(__FILE__, __LINE__, #expr); \
 } while(0)
 
-#define JS_THROW(msg) do {                              \
+#define JS_THROW(msg) do {                               \
   CHECK(napi_throw_error(env, (msg), (msg)) == napi_ok); \
-  return NULL;                                          \
+  return NULL;                                           \
 } while (0)
 
 #define JS_THROW_CODE(code, msg) do {                     \
@@ -49,7 +49,6 @@
 } while(0)
 
 #define JS_ASSERT(cond, msg) if (!(cond)) JS_THROW(msg)
-/* #define JS_ASSERT(cond, msg) CHECK(cond) */
 #define JS_NAPI_OK(status, msg) JS_ASSERT(status == napi_ok, msg)
 
 /*
@@ -152,7 +151,7 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
                                   var,             \
                                   NULL,            \
                                   URKEL_HASH_SIZE, \
-                                  false);         \
+                                  false);          \
 } while(0)
 
 #define NURKEL_CREATE_ASYNC_WORK(name, worker, result) do { \
@@ -217,12 +216,13 @@ typedef struct nurkel_tx_s {
  * Worker setup
  */
 
-#define WORKER_BASE_PROPS \
-  void *ctx;              \
+#define WORKER_BASE_PROPS(ctx_t) \
+  ctx_t *ctx;             \
   int errno;              \
   bool success;           \
   napi_deferred deferred; \
-  napi_async_work work;
+  napi_async_work work;   \
+  napi_ref ref;
 
 #define WORKER_INIT(worker) do { \
   worker->errno = 0;             \
@@ -230,10 +230,11 @@ typedef struct nurkel_tx_s {
   worker->ctx = NULL;            \
   worker->deferred = NULL;       \
   worker->work = NULL;           \
+  worker->ref = NULL;            \
 } while(0)
 
 typedef struct nurkel_open_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tree_t)
   char *in_path;
   size_t in_path_len;
 
@@ -241,23 +242,23 @@ typedef struct nurkel_open_worker_s {
 } nurkel_open_worker_t;
 
 typedef struct nurkel_close_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tree_t)
   bool in_destroy;
 } nurkel_close_worker_t;
 
 typedef struct nurkel_destroy_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tree_t)
   char *in_path;
   size_t in_path_len;
 } nurkel_destroy_worker_t;
 
 typedef struct nurkel_root_hash_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tree_t)
   uint8_t out_hash[URKEL_HASH_SIZE];
 } nurkel_root_hash_worker_t;
 
 typedef struct nurkel_get_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tree_t)
   uint8_t in_key[URKEL_HASH_SIZE];
 
   uint8_t out_value[URKEL_VALUE_SIZE];
@@ -265,14 +266,14 @@ typedef struct nurkel_get_worker_s {
 } nurkel_get_worker_t;
 
 typedef struct nurkel_has_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tree_t)
   uint8_t in_key[URKEL_HASH_SIZE];
 
   bool out_has_key;
 } nurkel_has_worker_t;
 
 typedef struct nurkel_prove_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tree_t)
   uint8_t in_key[URKEL_HASH_SIZE];
 
   uint8_t *out_proof;
@@ -280,7 +281,7 @@ typedef struct nurkel_prove_worker_s {
 } nurkel_prove_worker_t;
 
 typedef struct nurkel_verify_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tree_t)
   uint8_t in_root[URKEL_HASH_SIZE];
   uint8_t in_key[URKEL_HASH_SIZE];
   uint8_t *in_proof;
@@ -294,21 +295,21 @@ typedef struct nurkel_verify_worker_s {
 /* Transaction workers */
 
 typedef struct nurkel_tx_open_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tx_t)
 } nurkel_tx_open_worker_t;
 
 typedef struct nurkel_tx_close_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tx_t)
   bool in_destroy;
 } nurkel_tx_close_worker_t;
 
 typedef struct nurkel_tx_root_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tx_t)
   uint8_t out_hash[URKEL_HASH_SIZE];
 } nurkel_tx_root_hash_worker_t;
 
 typedef struct nurkel_tx_get_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tx_t)
   uint8_t in_key[URKEL_HASH_SIZE];
 
   uint8_t out_value[URKEL_VALUE_SIZE];
@@ -316,33 +317,33 @@ typedef struct nurkel_tx_get_worker_s {
 } nurkel_tx_get_worker_t;
 
 typedef struct nurkel_tx_has_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tx_t)
   uint8_t in_key[URKEL_HASH_SIZE];
 
   bool out_has_key;
 } nurkel_tx_has_worker_t;
 
 typedef struct nurkel_tx_insert_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tx_t)
   uint8_t in_key[URKEL_HASH_SIZE];
   uint8_t in_value[URKEL_VALUE_SIZE];
   size_t in_value_len;
 } nurkel_tx_insert_worker_t;
 
 typedef struct nurkel_tx_remove_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tx_t)
   uint8_t in_key[URKEL_HASH_SIZE];
 } nurkel_tx_remove_worker_t;
 
 typedef struct nurkel_tx_prove_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tx_t)
   uint8_t in_key[URKEL_HASH_SIZE];
   uint8_t *out_proof;
   size_t out_proof_len;
 } nurkel_tx_prove_worker_t;
 
 typedef struct nurkel_tx_commit_worker_s {
-  WORKER_BASE_PROPS
+  WORKER_BASE_PROPS(nurkel_tx_t)
 } nurkel_tx_commit_worker_t;
 
 #undef WORKER_BASE_PROPS
@@ -802,21 +803,19 @@ NURKEL_COMPLETE(open) {
                                 "Urkel open failed.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-    goto cleanup;
+  } else {
+    ntree->is_open = true;
+    ntree->is_opening = false;
+    memcpy(ntree->root, worker->out_hash, URKEL_HASH_SIZE);
+
+    NAPI_OK(napi_create_buffer_copy(env,
+                                    URKEL_HASH_SIZE,
+                                    ntree->root,
+                                    NULL,
+                                    &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-  ntree->is_open = true;
-  ntree->is_opening = false;
-  memcpy(ntree->root, worker->out_hash, URKEL_HASH_SIZE);
-
-  NAPI_OK(napi_create_buffer_copy(env,
-                                  URKEL_HASH_SIZE,
-                                  ntree->root,
-                                  NULL,
-                                  &result));
-  NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
-
-cleanup:
   NAPI_OK(napi_delete_async_work(env, worker->work));
   /* NOTE: We can clean this up because urkel_tree is not using it. */
   /* Internally it creates a copy in the store. */
@@ -840,10 +839,7 @@ NURKEL_METHOD(open) {
   JS_ASSERT(!ntree->is_closing, "Tree is closing.");
 
   worker = malloc(sizeof(nurkel_open_worker_t));
-  if (worker == NULL) {
-    err = JS_ERR_ALLOC;
-    goto throw;
-  }
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
 
   WORKER_INIT(worker);
   worker->ctx = ntree;
@@ -1012,10 +1008,7 @@ NURKEL_COMPLETE(close) {
   ntree->should_close = false;
   ntree->close_worker = NULL;
 
-  NAPI_OK(napi_delete_async_work(env, worker->work));
-
   if (worker->deferred != NULL) {
-
     if (status != napi_ok || worker->success == false) {
       NAPI_OK(nurkel_create_error(env,
                                   worker->errno,
@@ -1027,6 +1020,8 @@ NURKEL_COMPLETE(close) {
       NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
     }
   }
+
+  NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (worker->in_destroy || ntree->should_cleanup)
     free(ntree);
@@ -1096,7 +1091,6 @@ NURKEL_COMPLETE(root_hash) {
   nurkel_tree_t *ntree = worker->ctx;
 
   ntree->workers--;
-  NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (!worker->success || status != napi_ok) {
     NAPI_OK(nurkel_create_error(env,
@@ -1104,16 +1098,16 @@ NURKEL_COMPLETE(root_hash) {
                                 "Failed to get root_hash.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-    free(worker);
-    return;
+  } else {
+    NAPI_OK(napi_create_buffer_copy(env,
+                                    URKEL_HASH_SIZE,
+                                    worker->out_hash,
+                                    NULL,
+                                    &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-  NAPI_OK(napi_create_buffer_copy(env,
-                                  URKEL_HASH_SIZE,
-                                  worker->out_hash,
-                                  NULL,
-                                  &result));
-  NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   free(worker);
 }
 
@@ -1195,13 +1189,11 @@ NURKEL_COMPLETE(destroy) {
                                 JS_ERR_URKEL_DESTROY,
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-    goto cleanup;
+  } else {
+    NAPI_OK(napi_get_undefined(env, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-  NAPI_OK(napi_get_undefined(env, &result));
-  NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
-
-cleanup:
   NAPI_OK(napi_delete_async_work(env, worker->work));
   free(worker->in_path);
   free(worker);
@@ -1318,13 +1310,10 @@ NURKEL_EXEC(get) {
 
 NURKEL_COMPLETE(get) {
   napi_value result;
-  nurkel_tree_t *ntree = NULL;
   nurkel_get_worker_t *worker = data;
+  nurkel_tree_t *ntree = worker->ctx;
 
-  ntree = worker->ctx;
   ntree->workers--;
-
-  NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
@@ -1341,9 +1330,9 @@ NURKEL_COMPLETE(get) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_close_try_close(env, ntree));
   free(worker);
-  return;
 }
 
 NURKEL_METHOD(get) {
@@ -1437,8 +1426,6 @@ NURKEL_COMPLETE(has) {
   nurkel_tree_t *ntree = worker->ctx;
   ntree->workers--;
 
-  NAPI_OK(napi_delete_async_work(env, worker->work));
-
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
                                 worker->errno,
@@ -1450,6 +1437,7 @@ NURKEL_COMPLETE(has) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_close_try_close(env, ntree));
   free(worker);
 }
@@ -1571,9 +1559,8 @@ NURKEL_COMPLETE(prove) {
   napi_value result;
   nurkel_prove_worker_t *worker = data;
   nurkel_tree_t *ntree = worker->ctx;
-  ntree->workers--;
 
-  NAPI_OK(napi_delete_async_work(env, worker->work));
+  ntree->workers--;
 
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
@@ -1591,6 +1578,7 @@ NURKEL_COMPLETE(prove) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_close_try_close(env, ntree));
   if (worker->out_proof != NULL)
     free(worker->out_proof);
@@ -1635,15 +1623,6 @@ NURKEL_METHOD(prove) {
   }
 
   return result;
-}
-
-void
-nurkel_print_hex(uint8_t *data, size_t bytes) {
-  size_t i;
-  for (i = 0; i < bytes; i++)
-    printf("%02x ", data[i]);
-
-  printf("\n");
 }
 
 NURKEL_METHOD(verify_sync) {
@@ -2111,8 +2090,6 @@ NURKEL_COMPLETE(tx_close) {
   ntx->should_close = false;
   ntx->close_worker = NULL;
 
-  NAPI_OK(napi_delete_async_work(env, worker->work));
-
   if (worker->deferred != NULL && status != napi_ok) {
     NAPI_OK(nurkel_create_error(env,
                                 worker->errno,
@@ -2124,8 +2101,10 @@ NURKEL_COMPLETE(tx_close) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+
   nurkel_unregister_tx(ntx);
-  nurkel_close_try_close(env, ntree);
+  NAPI_OK(napi_delete_async_work(env, worker->work));
+  NAPI_OK(nurkel_close_try_close(env, ntree));
 
   if (worker->in_destroy || ntx->should_cleanup)
     free(ntx);
@@ -2185,14 +2164,10 @@ NURKEL_EXEC(tx_root_hash) {
 
 NURKEL_COMPLETE(tx_root_hash) {
   napi_value result;
-  nurkel_tx_t *ntx = NULL;
   nurkel_tx_root_hash_worker_t *worker = data;
-  CHECK(worker != NULL);
+  nurkel_tx_t *ntx = worker->ctx;
 
-  ntx = worker->ctx;
   ntx->workers--;
-
-  NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
@@ -2201,17 +2176,16 @@ NURKEL_COMPLETE(tx_root_hash) {
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
     NAPI_OK(nurkel_tx_close_try_close(env, ntx));
-    free(worker);
-    return;
+  } else {
+    NAPI_OK(napi_create_buffer_copy(env,
+                                    URKEL_HASH_SIZE,
+                                    worker->out_hash,
+                                    NULL,
+                                    &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-
-  NAPI_OK(napi_create_buffer_copy(env,
-                                  URKEL_HASH_SIZE,
-                                  worker->out_hash,
-                                  NULL,
-                                  &result));
-  NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
 }
@@ -2306,8 +2280,6 @@ NURKEL_COMPLETE(tx_get) {
 
   ntx->workers--;
 
-  NAPI_OK(napi_delete_async_work(env, worker->work));
-
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
                                 worker->errno,
@@ -2323,6 +2295,7 @@ NURKEL_COMPLETE(tx_get) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
   return;
@@ -2417,13 +2390,10 @@ NURKEL_EXEC(tx_has) {
 
 NURKEL_COMPLETE(tx_has) {
   napi_value result;
-  nurkel_tx_t *ntx = NULL;
   nurkel_tx_has_worker_t *worker = data;
+  nurkel_tx_t *ntx = worker->ctx;
 
-  ntx = worker->ctx;
   ntx->workers--;
-
-  NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
@@ -2436,6 +2406,7 @@ NURKEL_COMPLETE(tx_has) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
 }
@@ -2534,21 +2505,18 @@ NURKEL_COMPLETE(tx_insert) {
 
   ntx->workers--;
 
-  NAPI_OK(napi_delete_async_work(env, worker->work));
-
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
                                 worker->errno,
                                 "Failed to tx insert.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-    NAPI_OK(nurkel_tx_close_try_close(env, ntx));
-    free(worker);
-    return;
+  } else {
+    NAPI_OK(napi_get_undefined(env, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-  NAPI_OK(napi_get_undefined(env, &result));
-  NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
 }
@@ -2647,21 +2615,19 @@ NURKEL_COMPLETE(tx_remove) {
 
   ntx->workers--;
 
-  NAPI_OK(napi_delete_async_work(env, worker->work));
-
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
                                 worker->errno,
                                 "Failed to tx remove.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-    NAPI_OK(nurkel_tx_close_try_close(env, ntx));
-    free(worker);
-    return;
+  } else {
+    NAPI_OK(napi_get_undefined(env, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-  NAPI_OK(napi_get_undefined(env, &result));
-  NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
 }
@@ -2754,13 +2720,10 @@ NURKEL_EXEC(tx_prove) {
 
 NURKEL_COMPLETE(tx_prove) {
   napi_value result;
-  nurkel_tx_t *ntx;
   nurkel_tx_prove_worker_t *worker = data;
+  nurkel_tx_t *ntx = worker->ctx;
 
-  ntx = worker->ctx;
   ntx->workers--;
-
-  NAPI_OK(napi_delete_async_work(env, worker->work));
 
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
@@ -2780,6 +2743,7 @@ NURKEL_COMPLETE(tx_prove) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   if (worker->out_proof != NULL)
     free(worker->out_proof);
@@ -2863,8 +2827,6 @@ NURKEL_COMPLETE(tx_commit) {
 
   ntx->workers--;
 
-  NAPI_OK(napi_delete_async_work(env, worker->work));
-
   if (status != napi_ok || worker->success == false) {
     NAPI_OK(nurkel_create_error(env,
                                 worker->errno,
@@ -2876,6 +2838,7 @@ NURKEL_COMPLETE(tx_commit) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
 }
