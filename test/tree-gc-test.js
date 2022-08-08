@@ -1,6 +1,5 @@
 'use strict';
 
-const path = require('path');
 const assert = require('bsert');
 const fs = require('fs');
 const {testdir, rmTreeDir, isTreeDir} = require('./util/common');
@@ -10,19 +9,16 @@ describe('Urkel Tree (GC)', function () {
   if (!global.gc)
     this.skip();
 
-  let prefix, treeDir;
+  let prefix;
 
   beforeEach(() => {
-    prefix = testdir('open');
-    treeDir = path.join(prefix, 'tree');
+    prefix = testdir('tree-gc');
     fs.mkdirSync(prefix);
   });
 
   afterEach(() => {
-    if (fs.existsSync(treeDir))
-      rmTreeDir(treeDir);
-
-    fs.rmdirSync(prefix);
+    if (isTreeDir(prefix))
+      rmTreeDir(prefix);
   });
 
   it('should open and close database', async () => {
@@ -33,14 +29,13 @@ describe('Urkel Tree (GC)', function () {
       await tree.close();
     }
 
-    assert(isTreeDir(treeDir), 'Tree was not created.');
+    assert(isTreeDir(prefix), 'Tree was not created.');
     global.gc();
   });
 
   it('should cleanup', async () => {
     {
-      const tree = new Tree({prefix});
-      tree.init();
+      new Tree({prefix});
     }
 
     global.gc();
@@ -54,7 +49,7 @@ describe('Urkel Tree (GC)', function () {
       await tree.close();
     }
 
-    assert(isTreeDir(treeDir));
+    assert(isTreeDir(prefix));
     global.gc();
   });
 
@@ -65,7 +60,7 @@ describe('Urkel Tree (GC)', function () {
       await tree.open();
     };
 
-    assert(isTreeDir(treeDir, true));
+    assert(isTreeDir(prefix, true));
     global.gc();
   });
 });

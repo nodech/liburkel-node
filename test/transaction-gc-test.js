@@ -1,30 +1,26 @@
 'use strict';
 
-const path = require('path');
 const assert = require('bsert');
 const fs = require('fs');
-const {testdir, rmTreeDir, randomKey} = require('./util/common');
+const {testdir, isTreeDir, rmTreeDir, randomKey} = require('./util/common');
 const {Tree} = require('../lib/tree');
 
 describe('Urkel Transaction (GC)', function () {
   if (!global.gc)
     this.skip();
 
-  let prefix, treeDir, tree;
+  let prefix, tree;
 
   beforeEach(async () => {
-    prefix = testdir('open');
-    treeDir = path.join(prefix, 'tree');
+    prefix = testdir('tx-gc');
     fs.mkdirSync(prefix);
 
     tree = new Tree({prefix});
   });
 
   afterEach(async () => {
-    if (fs.existsSync(treeDir))
-      rmTreeDir(treeDir);
-
-    fs.rmdirSync(prefix);
+    if (isTreeDir(prefix))
+      rmTreeDir(prefix);
     global.gc();
   });
 

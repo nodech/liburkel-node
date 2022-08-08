@@ -3,17 +3,16 @@
 const path = require('path');
 const assert = require('bsert');
 const fs = require('fs');
-const {testdir, rmTreeDir, randomKey} = require('./util/common');
-const {Tree} = require('../lib/tree');
+const {testdir, rmTreeDir, isTreeDir, randomKey} = require('./util/common');
+const {Tree, codes} = require('../lib/tree');
 
 const NULL_HASH = Buffer.alloc(32, 0);
 
 describe('Urkel Tree', function () {
-  let prefix, treeDir, tree;
+  let prefix, tree;
 
   beforeEach(async () => {
-    prefix = testdir('open');
-    treeDir = path.join(prefix, 'tree');
+    prefix = testdir('tree');
     fs.mkdirSync(prefix);
 
     tree = new Tree({ prefix });
@@ -22,10 +21,9 @@ describe('Urkel Tree', function () {
 
   afterEach(async () => {
     await tree.close();
-    if (fs.existsSync(treeDir))
-      rmTreeDir(treeDir);
 
-    fs.rmdirSync(prefix);
+    if (isTreeDir(prefix))
+      rmTreeDir(prefix);
   });
 
   it('should get tree root', async () => {
@@ -55,7 +53,6 @@ describe('Urkel Tree', function () {
 
   it('should remove all tree files (sync)', async () => {
     const prefix = testdir('files');
-    const treeDir = path.join(prefix, 'tree');
     fs.mkdirSync(prefix);
 
     const tree = new Tree({ prefix });
@@ -63,28 +60,25 @@ describe('Urkel Tree', function () {
     await tree.close();
 
     assert.throws(() => {
-      // NOTE: prefix is not the actual directory. it's tree
-      // so it throws.
-      Tree.destroySync(prefix);
+      // NOTE: prefix/tree is not the actual directory. it's prefix itself.
+      Tree.destroySync(path.join(prefix, 'tree'));
     }, {
       code: 'URKEL_EBADOPEN',
       message: 'Urkel destroy failed.'
     });
 
-    assert.deepStrictEqual(new Set(fs.readdirSync(treeDir)), new Set([
+    assert.deepStrictEqual(new Set(fs.readdirSync(prefix)), new Set([
       'meta',
       '0000000001'
     ]));
 
     // This should destroy it.
-    Tree.destroySync(treeDir);
-    assert.strictEqual(fs.existsSync(treeDir), false);
-    fs.rmdirSync(prefix);
+    Tree.destroySync(prefix);
+    assert.strictEqual(fs.existsSync(prefix), false);
   });
 
   it('should remove all tree files', async () => {
     const prefix = testdir('files');
-    const treeDir = path.join(prefix, 'tree');
     fs.mkdirSync(prefix);
 
     const tree = new Tree({ prefix });
@@ -94,21 +88,20 @@ describe('Urkel Tree', function () {
     assert.rejects(async () => {
       // NOTE: prefix is not the actual directory. it's tree
       // so it throws.
-      await Tree.destroy(prefix);
+      await Tree.destroy(path.join(prefix, 'tree'));
     }, {
       code: 'URKEL_EBADOPEN',
       message: 'Urkel destroy failed.'
     });
 
-    assert.deepStrictEqual(new Set(fs.readdirSync(treeDir)), new Set([
+    assert.deepStrictEqual(new Set(fs.readdirSync(prefix)), new Set([
       'meta',
       '0000000001'
     ]));
 
     // This should destroy it.
-    await Tree.destroy(treeDir);
-    assert.strictEqual(fs.existsSync(treeDir), false);
-    fs.rmdirSync(prefix);
+    await Tree.destroy(prefix);
+    assert.strictEqual(fs.existsSync(prefix), false);
   });
 
   it('should get values', async () => {
@@ -154,7 +147,7 @@ describe('Urkel Tree', function () {
     });
   });
 
-  it.only('should get proof', async () => {
+  it('should get proof', async () => {
     const keys = [];
     const values = [];
     const proofs = [];
@@ -167,7 +160,7 @@ describe('Urkel Tree', function () {
       await txn.open();
 
       for (let j = 0; j < 5; j++) {
-        const key = randomKey();
+        const key = Buffer.alloc(32, i * 5 + j);
         const value = Buffer.from(`Value: ${i}.${j}.`);
 
         await txn.insert(key, value);
@@ -191,32 +184,15 @@ describe('Urkel Tree', function () {
       }
     }
 
-    let err = null;
-    try {
-      Tree.verifySync(proofs[0], keys[1], roots[0]);
-    } catch (e) {
-      err = e;
-    }
+    let [code, value, exists] = Tree.verifySync(proofs[0], keys[1], roots[0]);
+    assert.strictEqual(value, null);
+    assert.strictEqual(exists, false);
+    assert.strictEqual(code, codes.URKEL_EHASHMISMATCH);
 
-    assert(err, 'Tree.verifySync should throw.');
-    assert.strictEqual(err.message, 'Failed to verify_sync.');
-    assert.strictEqual(err.code, 'URKEL_EHASHMISMATCH');
-
-    err = null;
-    try {
-      await Tree.verify(proofs[0], keys[1], roots[0]);
-    } catch (e) {
-      err = e;
-    }
-
-    assert(err, 'Tree.verify should throw.');
-    assert.strictEqual(err.message, 'Failed to verify.');
-    assert.strictEqual(err.code, 'URKEL_EHASHMISMATCH');
-
-    await assert.rejects(Tree.verify(proofs[0], keys[1], roots[0]), {
-      code: 'URKEL_EHASHMISMATCH',
-      message: 'Failed to verify.'
-    });
+    [code, value, exists] = await Tree.verify(proofs[0], keys[1], roots[0]);
+    assert.strictEqual(value, null);
+    assert.strictEqual(exists, false);
+    assert.strictEqual(code, codes.URKEL_EHASHMISMATCH);
 
     for (let i = 0; i < keys.length; i++) {
       const origValue = values[i];
@@ -228,13 +204,23 @@ describe('Urkel Tree', function () {
       assert.bufferEqual(treeProofSync, proof);
       assert.bufferEqual(treeProof, proof);
 
-      const [exitsSync, valueSync] = Tree.verifySync(proof, keys[i], root);
-      const [exits, value] = await Tree.verify(proof, keys[i], root);
+      {
+        const [codeSync, valueSync, existsSync] = Tree.verifySync(
+          proof,
+          keys[i],
+          root
+        );
 
-      assert.strictEqual(exitsSync, true);
-      assert.strictEqual(exits, true);
-      assert.bufferEqual(valueSync, origValue);
-      assert.bufferEqual(value, origValue);
+        const [code, value, exists] = await Tree.verify(proof, keys[i], root);
+
+        assert.strictEqual(codeSync, codes.URKEL_OK);
+        assert.strictEqual(existsSync, true);
+        assert.bufferEqual(valueSync, origValue);
+
+        assert.strictEqual(code, codes.URKEL_OK);
+        assert.strictEqual(exists, true);
+        assert.bufferEqual(value, origValue);
+      }
     }
   });
 });
