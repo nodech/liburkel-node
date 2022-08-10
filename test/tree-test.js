@@ -211,7 +211,7 @@ describe('Urkel Tree', function () {
     }
   });
 
-  it.only('should inject', async () => {
+  it('should inject', async () => {
     // 5 roots with 5 entries
     const ROOTS = 5;
     const ENTRIES = 5;

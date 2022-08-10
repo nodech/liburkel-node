@@ -101,4 +101,32 @@ describe('Urkel Transaction', function () {
 
     await txn1.close();
   });
+
+  it('should clear the transaction', async () => {
+    const txn1 = tree.txn();
+    await txn1.open();
+
+    assert.bufferEqual(txn1.rootHash(), NULL_HASH);
+
+    for (let i = 0; i < 10; i++) {
+      const key = randomKey();
+      const value = Buffer.from(`Hello ${i}.`);
+
+      await txn1.insert(key, value);
+    }
+
+    assert.notBufferEqual(txn1.rootHash(), NULL_HASH);
+    await txn1.clear();
+    assert.bufferEqual(txn1.rootHash(), NULL_HASH);
+
+    for (let i = 0; i < 10; i++) {
+      const key = randomKey();
+      const value = Buffer.from(`Hello ${i}.`);
+
+      await txn1.insert(key, value);
+    }
+
+    txn1.clearSync();
+    assert.bufferEqual(txn1.rootHash(), NULL_HASH);
+  });
 });
