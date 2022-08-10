@@ -134,17 +134,8 @@ describe('Urkel Tree', function () {
       assert.strictEqual(await tree.has(keys[i]), true);
     }
 
-    assert.throws(() => {
-      tree.getSync(randomKey());
-    }, {
-      code: 'URKEL_ENOTFOUND',
-      message: 'Failed to get.'
-    });
-
-    await assert.rejects(tree.get(randomKey()), {
-      code: 'URKEL_ENOTFOUND',
-      message: 'Failed to get.'
-    });
+    assert.strictEqual(tree.getSync(randomKey()), null);
+    assert.strictEqual(await tree.get(randomKey()), null);
   });
 
   it('should get proof', async () => {
@@ -184,14 +175,12 @@ describe('Urkel Tree', function () {
       }
     }
 
-    let [code, value, exists] = Tree.verifySync(proofs[0], keys[1], roots[0]);
+    let [code, value] = Tree.verifySync(roots[0], keys[1], proofs[0]);
     assert.strictEqual(value, null);
-    assert.strictEqual(exists, false);
     assert.strictEqual(code, codes.URKEL_EHASHMISMATCH);
 
-    [code, value, exists] = await Tree.verify(proofs[0], keys[1], roots[0]);
+    [code, value] = await Tree.verify(roots[0], keys[1], proofs[0]);
     assert.strictEqual(value, null);
-    assert.strictEqual(exists, false);
     assert.strictEqual(code, codes.URKEL_EHASHMISMATCH);
 
     for (let i = 0; i < keys.length; i++) {
@@ -205,20 +194,18 @@ describe('Urkel Tree', function () {
       assert.bufferEqual(treeProof, proof);
 
       {
-        const [codeSync, valueSync, existsSync] = Tree.verifySync(
-          proof,
+        const [codeSync, valueSync] = Tree.verifySync(
+          root,
           keys[i],
-          root
+          proof
         );
 
-        const [code, value, exists] = await Tree.verify(proof, keys[i], root);
+        const [code, value] = await Tree.verify(root, keys[i], proof);
 
         assert.strictEqual(codeSync, codes.URKEL_OK);
-        assert.strictEqual(existsSync, true);
         assert.bufferEqual(valueSync, origValue);
 
         assert.strictEqual(code, codes.URKEL_OK);
-        assert.strictEqual(exists, true);
         assert.bufferEqual(value, origValue);
       }
     }

@@ -13,20 +13,72 @@
 #include <urkel.h>
 #include <node_api.h>
 
+/*
+ * Urkel errors
+ */
+
+/* Errnos start with 1, 0 = everything's ok. */
+static const char *urkel_errors[] = {
+  "URKEL_EHASHMISMATCH",
+  "URKEL_ESAMEKEY",
+  "URKEL_ESAMEPATH",
+  "URKEL_ENEGDEPTH",
+  "URKEL_EPATHMISMATCH",
+  "URKEL_ETOODEEP",
+  "URKEL_EINVAL",
+  "URKEL_ENOTFOUND",
+  "URKEL_ECORRUPTION",
+  "URKEL_ENOUPDATE",
+  "URKEL_EBADWRITE",
+  "URKEL_EBADOPEN",
+  "URKEL_EITEREND"
+};
+
+static const int
+urkel_errors_len = sizeof(urkel_errors) / sizeof(urkel_errors[0]);
+
+
+/*
+ * Urkel constants
+ */
+
 #define URKEL_HASH_SIZE 32
 #define URKEL_VALUE_SIZE 1023
 #define URKEL_PROOF_SIZE 17957
 
-#define ERR_UNKNOWN "ERR_UNKNOWN"
+enum inst_state {
+  inst_state_ok = 0,
+  inst_state_is_closed = 1,
+  inst_state_is_closing = 2,
+  inst_state_is_opening = 3,
+  inst_state_should_close = 4
+};
 
+static const char *inst_errors[] = {
+  "ok.",
+  "is closed.",
+  "is closing.",
+  "is opening.",
+  "should close"
+};
+
+/*
+ * Nurkel errors
+ */
+
+#define ERR_UNKNOWN "ERR_UNKNOWN"
 #define JS_ERR_INIT "Failed to initialize."
 #define JS_ERR_NOT_IMPL "Not implemented."
 #define JS_ERR_ARG "Invalid argument."
 #define JS_ERR_ALLOC "Allocation failed."
 #define JS_ERR_NODE "Node internal error."
 #define JS_ERR_UNKNOWN "Unknown internal error."
-
 #define JS_ERR_URKEL_DESTROY "Urkel destroy failed."
+
+
+/*
+ * General NAPI Macros
+ */
 
 #define CHECK(expr) do {                           \
   if (!(expr))                                     \
@@ -50,30 +102,6 @@
 
 #define JS_ASSERT(cond, msg) if (!(cond)) JS_THROW(msg)
 #define JS_NAPI_OK(status, msg) JS_ASSERT(status == napi_ok, msg)
-
-/*
- * Urkel errors
- */
-
-/* Errnos start with 1, 0 = everything's ok. */
-static char *urkel_errors[] = {
-  "URKEL_EHASHMISMATCH",
-  "URKEL_ESAMEKEY",
-  "URKEL_ESAMEPATH",
-  "URKEL_ENEGDEPTH",
-  "URKEL_EPATHMISMATCH",
-  "URKEL_ETOODEEP",
-  "URKEL_EINVAL",
-  "URKEL_ENOTFOUND",
-  "URKEL_ECORRUPTION",
-  "URKEL_ENOUPDATE",
-  "URKEL_EBADWRITE",
-  "URKEL_EBADOPEN",
-  "URKEL_EITEREND"
-};
-
-static const int
-urkel_errors_len = sizeof(urkel_errors) / sizeof(urkel_errors[0]);
 
 /*
  * NAPI related macros.
@@ -126,12 +154,21 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
   JS_ASSERT(ntx != NULL, JS_ERR_ARG);                                        \
   ntree = ntx->ntree
 
-#define NURKEL_TREE_READY()                                 \
-  JS_ASSERT(nurkel_tree_ready(ntree), "Tree is not ready.")
+#define NURKEL_TREE_READY() do {                         \
+  enum inst_state tree_state = nurkel_tree_ready(ntree); \
+  if (tree_state != inst_state_ok)                       \
+    JS_THROW(inst_errors[tree_state]);                   \
+} while(0)
 
-#define NURKEL_TX_READY()                                       \
-  JS_ASSERT(nurkel_tx_ready(ntx), "Transaction is not ready."); \
-  JS_ASSERT(nurkel_tree_ready(ntree), "Tree is not ready.")
+#define NURKEL_TX_READY() do {                             \
+  enum inst_state tree_state = nurkel_tree_ready(ntree);   \
+  if (tree_state != inst_state_ok)                         \
+    JS_THROW(inst_errors[tree_state]);                     \
+                                                           \
+  enum inst_state tx_state = nurkel_tx_ready(ntx);         \
+  if (tx_state != inst_state_ok)                           \
+    JS_THROW(inst_errors[tx_state]);                       \
+} while(0)
 
 /* This needs to be before we have anything to free */
 #define NURKEL_JS_WORKNAME(name)                                          \
@@ -181,7 +218,6 @@ typedef struct nurkel_tx_entry_s {
 
 typedef struct nurkel_tree_s {
   urkel_t *tree;
-  unsigned char root[URKEL_HASH_SIZE];
   napi_ref ref;
   uint32_t workers;
   void *close_worker;
@@ -202,7 +238,7 @@ typedef struct nurkel_tx_s {
   nurkel_tx_entry_t *entry;
   uint32_t workers;
   void *close_worker;
-  unsigned char root[URKEL_HASH_SIZE];
+  uint8_t init_root[URKEL_HASH_SIZE];
   bool is_open;
   bool is_opening;
   bool is_closing;
@@ -344,6 +380,7 @@ typedef struct nurkel_tx_prove_worker_s {
 
 typedef struct nurkel_tx_commit_worker_s {
   WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t out_hash[URKEL_HASH_SIZE];
 } nurkel_tx_commit_worker_t;
 
 #undef WORKER_BASE_PROPS
@@ -352,19 +389,19 @@ typedef struct nurkel_tx_commit_worker_s {
  * Close params
  */
 
-#define WORKER_CLOSE_PARAMS   \
-  napi_env env;               \
-  void *ctx;                  \
-  napi_value *promise_result; \
-  bool promise;               \
-  bool destroy;               \
+#define WORKER_CLOSE_PARAMS(ctx_t) \
+  napi_env env;                    \
+  void *ctx;                       \
+  napi_value *promise_result;      \
+  bool promise;                    \
+  bool destroy;                    \
 
 typedef struct nurkel_close_params_s {
-  WORKER_CLOSE_PARAMS
+  WORKER_CLOSE_PARAMS(nurkel_tree_t)
 } nurkel_close_params_t;
 
 typedef struct nurkel_tx_close_params_s {
-  WORKER_CLOSE_PARAMS
+  WORKER_CLOSE_PARAMS(nurkel_tx_t)
 } nurkel_tx_close_params_t;
 
 /*
@@ -544,14 +581,23 @@ nurkel_ntree_init(nurkel_tree_t *ntree) {
   // Init list
   ntree->tx_len = 0;
   ntree->tx_head = NULL;
-
-  memset(ntree->root, 0, URKEL_HASH_SIZE);
 }
 
-static inline bool
+static inline enum inst_state
 nurkel_tree_ready(nurkel_tree_t *ntree) {
-  return ntree->is_open && !ntree->is_closing
-      && !ntree->is_opening && !ntree->should_close;
+  if (!ntree->is_open)
+    return inst_state_is_closed;
+
+  if (ntree->is_closing)
+    return inst_state_is_closing;
+
+  if (ntree->is_opening)
+    return inst_state_is_opening;
+
+  if (ntree->should_close)
+    return inst_state_should_close;
+
+  return inst_state_ok;
 }
 
 static void
@@ -566,13 +612,24 @@ nurkel_ntx_init(nurkel_tx_t *ntx) {
   ntx->is_closing = false;
   ntx->should_close = false;
   ntx->should_cleanup = false;
-  memset(ntx->root, 0, URKEL_HASH_SIZE);
+  memset(ntx->init_root, 0, URKEL_HASH_SIZE);
 }
 
-static inline bool
+static inline enum inst_state
 nurkel_tx_ready(nurkel_tx_t *ntx) {
-  return ntx->is_open && !ntx->is_closing
-    && !ntx->is_opening && !ntx->should_close;
+  if (!ntx->is_open)
+    return inst_state_is_closed;
+
+  if (ntx->is_closing)
+    return inst_state_is_closing;
+
+  if (ntx->is_opening)
+    return inst_state_is_opening;
+
+  if (ntx->should_close)
+    return inst_state_should_close;
+
+  return inst_state_ok;
 }
 
 static void
@@ -806,11 +863,10 @@ NURKEL_COMPLETE(open) {
   } else {
     ntree->is_open = true;
     ntree->is_opening = false;
-    memcpy(ntree->root, worker->out_hash, URKEL_HASH_SIZE);
 
     NAPI_OK(napi_create_buffer_copy(env,
                                     URKEL_HASH_SIZE,
-                                    ntree->root,
+                                    worker->out_hash,
                                     NULL,
                                     &result));
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
@@ -1238,7 +1294,30 @@ NURKEL_METHOD(destroy) {
 }
 
 NURKEL_METHOD(hash_sync) {
-  JS_THROW(JS_ERR_NOT_IMPL);
+  napi_value result;
+  uint8_t out_hash[URKEL_HASH_SIZE];
+  bool is_buffer;
+  uint8_t *in_data = NULL;
+  size_t in_data_len;
+
+  NURKEL_ARGV(1);
+
+  JS_NAPI_OK(napi_is_buffer(env, argv[0], &is_buffer), JS_ERR_ARG);
+  JS_ASSERT(is_buffer == true, JS_ERR_ARG);
+  JS_NAPI_OK(napi_get_buffer_info(env,
+                                  argv[0],
+                                  (void **)&in_data,
+                                  &in_data_len), JS_ERR_ARG);
+
+  urkel_hash(out_hash, in_data, in_data_len);
+
+  JS_NAPI_OK(napi_create_buffer_copy(env,
+                                     URKEL_HASH_SIZE,
+                                     out_hash,
+                                     NULL,
+                                     &result), JS_ERR_NODE);
+
+  return result;
 }
 
 /* NURKEL_EXEC(hash) { */
@@ -1514,24 +1593,24 @@ NURKEL_METHOD(remove) {
 NURKEL_METHOD(prove_sync) {
   napi_value result;
   napi_status status;
-  uint8_t key_buffer[URKEL_HASH_SIZE];
-  uint8_t *proof_raw = NULL;
-  size_t proof_len;
+  uint8_t in_key[URKEL_HASH_SIZE];
+  uint8_t *out_proof_raw = NULL;
+  size_t out_proof_len;
 
   NURKEL_ARGV(2);
   NURKEL_TREE_CONTEXT();
   NURKEL_TREE_READY();
-  NURKEL_JS_KEY_OK(argv[1], key_buffer);
+  NURKEL_JS_KEY_OK(argv[1], in_key);
 
-  if (!urkel_prove(ntree->tree, &proof_raw, &proof_len, key_buffer, NULL))
+  if (!urkel_prove(ntree->tree, &out_proof_raw, &out_proof_len, in_key, NULL))
     JS_THROW(urkel_errors[urkel_errno - 1]);
 
   status = napi_create_buffer_copy(env,
-                                   proof_len,
-                                   proof_raw,
+                                   out_proof_len,
+                                   out_proof_raw,
                                    NULL,
                                    &result);
-  free(proof_raw);
+  free(out_proof_raw);
 
   if (status != napi_ok)
     JS_THROW(JS_ERR_NODE);
@@ -1638,16 +1717,16 @@ NURKEL_METHOD(verify_sync) {
   size_t proof_len;
 
   NURKEL_ARGV(3);
+  NURKEL_JS_KEY_OK(argv[0], root);
   NURKEL_JS_KEY_OK(argv[1], key);
-  NURKEL_JS_KEY_OK(argv[2], root);
 
-  JS_NAPI_OK(napi_get_buffer_info(env, argv[0], NULL, &proof_len), JS_ERR_ARG);
+  JS_NAPI_OK(napi_get_buffer_info(env, argv[2], NULL, &proof_len), JS_ERR_ARG);
   proof = malloc(proof_len);
   JS_ASSERT(proof != NULL, JS_ERR_ALLOC);
   JS_ASSERT(proof_len <= URKEL_PROOF_SIZE, JS_ERR_ARG);
 
   JS_NAPI_OK(nurkel_get_buffer_copy(env,
-                                    argv[0],
+                                    argv[2],
                                     proof,
                                     &proof_len,
                                     proof_len,
@@ -1735,7 +1814,7 @@ NURKEL_METHOD(verify) {
 
   NURKEL_ARGV(3);
 
-  JS_NAPI_OK(napi_get_buffer_info(env, argv[0], NULL, &proof_len), JS_ERR_ARG);
+  JS_NAPI_OK(napi_get_buffer_info(env, argv[2], NULL, &proof_len), JS_ERR_ARG);
 
   worker = malloc(sizeof(nurkel_verify_worker_t));
   JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
@@ -1747,20 +1826,20 @@ NURKEL_METHOD(verify) {
     JS_THROW(JS_ERR_ALLOC);
   }
 
+  NURKEL_JS_KEY(argv[0], worker->in_root);
+  if (status != napi_ok) {
+    err = JS_ERR_ARG;
+    goto throw;
+  }
+
   NURKEL_JS_KEY(argv[1], worker->in_key);
   if (status != napi_ok) {
     err = JS_ERR_ARG;
     goto throw;
   }
 
-  NURKEL_JS_KEY(argv[2], worker->in_root);
-  if (status != napi_ok) {
-    err = JS_ERR_ARG;
-    goto throw;
-  }
-
   status = nurkel_get_buffer_copy(env,
-                                  argv[0],
+                                  argv[2],
                                   worker->in_proof,
                                   &worker->in_proof_len,
                                   proof_len,
@@ -1880,7 +1959,7 @@ NURKEL_EXEC(tx_open) {
   nurkel_tree_t *ntree = ntx->ntree;
   urkel_tx_t *tx = NULL;
 
-  tx = urkel_tx_create(ntree->tree, ntx->root);
+  tx = urkel_tx_create(ntree->tree, ntx->init_root);
 
   if (tx == NULL) {
     worker->success = false;
@@ -1929,6 +2008,17 @@ NURKEL_COMPLETE(tx_open) {
   free(worker);
 }
 
+/*
+ * TODO: Reconsider if this needs to be an async method. Ofc, with this we
+ * could also get rid of close and give that job sololy to GC (in tx_destroy).
+ * Example would be urkel. It only checks root when necessary operation occurs.
+ * We could use the similar approach and set root hash not on open but after.
+ *  NOTE: Only tree->revert or HASH != NULL will end up reading disk for the
+ * historical root.
+ *  p.s. If we also add root cache similar to urkel, we could even not get
+ * penalized for this operation??
+ */
+
 NURKEL_METHOD(tx_open) {
   napi_value result;
   napi_status status;
@@ -1965,9 +2055,9 @@ NURKEL_METHOD(tx_open) {
   }
 
   if (is_buffer) {
-    memcpy(ntx->root, buffer, URKEL_HASH_SIZE);
+    memcpy(ntx->init_root, buffer, URKEL_HASH_SIZE);
   } else {
-    memcpy(ntx->root, &ntree->root, URKEL_HASH_SIZE);
+    urkel_root(ntree->tree, ntx->init_root);
   }
 
   worker = malloc(sizeof(nurkel_tx_open_worker_t));
@@ -2676,25 +2766,26 @@ NURKEL_METHOD(tx_remove) {
 NURKEL_METHOD(tx_prove_sync) {
   napi_value result;
   napi_status status;
-  uint8_t key_buffer[URKEL_HASH_SIZE];
-  uint8_t *proof_raw = NULL;
-  size_t proof_len;
+  uint8_t in_key[URKEL_HASH_SIZE];
+  uint8_t *out_proof_raw = NULL;
+  size_t out_proof_len;
 
   NURKEL_ARGV(2);
   NURKEL_TX_CONTEXT();
   NURKEL_TX_READY();
-  NURKEL_JS_KEY_OK(argv[1], key_buffer);
+  NURKEL_JS_KEY_OK(argv[1], in_key);
 
-  if (!urkel_tx_prove(ntx->tx, &proof_raw, &proof_len, key_buffer))
+  if (!urkel_tx_prove(ntx->tx, &out_proof_raw, &out_proof_len, in_key))
     JS_THROW(urkel_errors[urkel_errno - 1]);
 
+  /* TODO: Move instead of copy */
   status = napi_create_buffer_copy(env,
-                                   proof_len,
-                                   proof_raw,
+                                   out_proof_len,
+                                   out_proof_raw,
                                    NULL,
                                    &result);
 
-  free(proof_raw);
+  free(out_proof_raw);
 
   if (status != napi_ok)
     JS_THROW(JS_ERR_NODE);
@@ -2733,8 +2824,7 @@ NURKEL_COMPLETE(tx_prove) {
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
   } else {
     CHECK(worker->out_proof != NULL);
-    /* TODO: Use create_external_buffer ??. */
-    /* TODO: buffer vs arraybuffer. */
+    /* TODO: Move instead of copy */
     NAPI_OK(napi_create_buffer_copy(env,
                                     worker->out_proof_len,
                                     worker->out_proof,
@@ -2792,16 +2882,22 @@ NURKEL_METHOD(tx_prove) {
 
 NURKEL_METHOD(tx_commit_sync) {
   napi_value result;
+  uint8_t tx_root[URKEL_HASH_SIZE];
 
   NURKEL_ARGV(1);
   NURKEL_TX_CONTEXT();
   NURKEL_TX_READY();
 
-  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
-
   if (!urkel_tx_commit(ntx->tx))
     JS_THROW(urkel_errors[urkel_errno - 1]);
 
+  urkel_tx_root(ntx->tx, tx_root);
+
+  JS_NAPI_OK(napi_create_buffer_copy(env,
+                                     URKEL_HASH_SIZE,
+                                     tx_root,
+                                     NULL,
+                                     &result), JS_ERR_NODE);
   return result;
 }
 
@@ -2817,6 +2913,7 @@ NURKEL_EXEC(tx_commit) {
     return;
   }
 
+  urkel_tx_root(ntx->tx, worker->out_hash);
   worker->success = true;
 }
 
@@ -2834,7 +2931,11 @@ NURKEL_COMPLETE(tx_commit) {
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
   } else {
-    NAPI_OK(napi_get_undefined(env, &result));
+    NAPI_OK(napi_create_buffer_copy(env,
+                                    URKEL_HASH_SIZE,
+                                    worker->out_hash,
+                                    NULL,
+                                    &result));
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 

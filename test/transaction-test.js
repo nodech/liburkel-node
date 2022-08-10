@@ -51,13 +51,7 @@ describe('Urkel Transaction', function () {
     assert.bufferEqual(resValue, value);
     txn1.removeSync(key1);
     assert.strictEqual(txn1.hasSync(key1), false);
-
-    assert.throws(() => {
-      txn1.getSync(key1);
-    }, {
-      code: 'URKEL_ENOTFOUND',
-      message: 'Failed to tx get key.'
-    });
+    assert.strictEqual(txn1.getSync(key1), null);
 
     await txn1.close();
   });
@@ -78,12 +72,7 @@ describe('Urkel Transaction', function () {
     await txn1.remove(key1);
     assert.strictEqual(await txn1.has(key1), false);
 
-    await assert.rejects(async () => {
-      await txn1.get(key1);
-    }, {
-      code: 'URKEL_ENOTFOUND',
-      message: 'Failed to tx get.'
-    });
+    assert.strictEqual(await txn1.get(key1), null);
 
     await txn1.close();
   });

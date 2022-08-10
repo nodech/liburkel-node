@@ -68,14 +68,19 @@ describe('Urkel Transaction (GC)', function () {
     await tree.open();
     const transaction = tree.transaction();
 
-    await transaction.maybeOpen();
+    await transaction.open();
     await tree.close();
 
-    await assert.rejects(async () => {
-      return await transaction.close();
-    }, {
-      message: 'Transaction is not ready.'
-    });
+    let err;
+
+    try {
+      await transaction.close();
+    } catch (e) {
+      err = e;
+    }
+
+    assert(err, 'Close should throw.');
+    assert.strictEqual(err.message, 'is closed.');
   });
 
   it('should close all transactions', async () => {
@@ -123,7 +128,7 @@ describe('Urkel Transaction (GC)', function () {
       if (i <= 3)
         assert.strictEqual(err.message, 'Transaction is not open.');
       else
-        assert.strictEqual(err.message, 'Transaction is not ready.');
+        assert.strictEqual(err.message, 'is closed.');
     }
   });
 
