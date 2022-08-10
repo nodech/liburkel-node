@@ -1,0 +1,66 @@
+diff --git a/deps/liburkel/src/nodes.c b/deps/liburkel/src/nodes.c
+index 149db46..8e503fe 100644
+--- a/deps/liburkel/src/nodes.c
++++ b/deps/liburkel/src/nodes.c
+@@ -169,7 +169,7 @@ void
+ urkel_node_mark(urkel_node_t *node,
+                 uint16_t index,
+                 uint32_t pos,
+-                uint8_t size) {
++                size_t size) {
+   CHECK(node->type != URKEL_NODE_NULL);
+ 
+   node->ptr.index = index;
+@@ -201,7 +201,7 @@ void
+ urkel_node_save(urkel_node_t *node,
+                 uint16_t index,
+                 uint32_t pos,
+-                uint8_t size) {
++                size_t size) {
+   urkel_leaf_t *leaf = &node->u.leaf;
+ 
+   CHECK(node->type == URKEL_NODE_LEAF);
+diff --git a/deps/liburkel/src/nodes.h b/deps/liburkel/src/nodes.h
+index 3e4a1b3..483966e 100644
+--- a/deps/liburkel/src/nodes.h
++++ b/deps/liburkel/src/nodes.h
+@@ -100,7 +100,7 @@ void
+ urkel_node_mark(urkel_node_t *node,
+                 uint16_t index,
+                 uint32_t pos,
+-                uint8_t size);
++                size_t size);
+ 
+ void
+ urkel_node_store(urkel_node_t *node,
+@@ -111,7 +111,7 @@ void
+ urkel_node_save(urkel_node_t *node,
+                 uint16_t index,
+                 uint32_t pos,
+-                uint8_t size);
++                size_t size);
+ 
+ void
+ urkel_node_to_hash(const urkel_node_t *node, urkel_node_t *out);
+diff --git a/deps/liburkel/test/test.c b/deps/liburkel/test/test.c
+index 5ff9615..e0b4024 100644
+--- a/deps/liburkel/test/test.c
++++ b/deps/liburkel/test/test.c
+@@ -389,6 +389,8 @@ static void
+ test_urkel_max_value_size(void) {
+   unsigned char key[32];
+   unsigned char val[1023 + 1];
++  unsigned char result[1023];
++  size_t result_len;
+   urkel_t *db;
+ 
+   memset(key, 0xaa, sizeof(key));
+@@ -406,6 +408,8 @@ test_urkel_max_value_size(void) {
+   ASSERT(urkel_errno == URKEL_EINVAL);
+ 
+   ASSERT(urkel_insert(db, key, val, sizeof(val) - 1));
++  ASSERT(urkel_get(db, result, &result_len, key, NULL));
++  ASSERT(result_len == 1023);
+ 
+   urkel_close(db);
+ 
