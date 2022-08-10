@@ -3,12 +3,12 @@
   "version": "0.0.0",
   "description": "Liburkel bindings for node.js",
   "license": "MIT",
-  "repository": "git://github.com/nodech/liburkel-node.git",
-  "homepage": "https://github.com/nodech/liburkel-node",
+  "repository": "git://github.com/nodech/nurkel.git",
+  "homepage": "https://github.com/nodech/nurkel",
   "bugs": {
-    "url": "https://github.com/nodech/liburkel-node/issues"
+    "url": "https://github.com/nodech/nurkel/issues"
   },
-  "main": "index.js",
+  "main": "lib/tree",
   "scripts": {
     "install": "node-gyp rebuild",
     "lint": "eslint lib/ test/",
