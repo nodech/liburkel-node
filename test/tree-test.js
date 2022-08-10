@@ -210,4 +210,96 @@ describe('Urkel Tree', function () {
       }
     }
   });
+
+  it.only('should inject', async () => {
+    // 5 roots with 5 entries
+    const ROOTS = 5;
+    const ENTRIES = 5;
+    const roots = [];
+    const entriesByRoot = [];
+
+    const txn = tree.batch();
+    await txn.open();
+
+    for (let i = 0; i < ROOTS; i++) {
+      const entries = [];
+      for (let j = 0; j < ENTRIES; j++) {
+        const key = randomKey();
+        const value = Buffer.from(`value ${i * 10 + j}.`);
+
+        entries.push([key, value]);
+        await txn.insert(key, value);
+      }
+
+      roots.push(await txn.commit());
+      entriesByRoot.push(entries);
+    }
+
+    await txn.close();
+    const last = tree.rootHash();
+
+    for (let i = ROOTS - 1; i >= 0; i--) {
+      // go to the past.
+      await tree.inject(roots[i]);
+
+      for (const [rootIndex, entries] of entriesByRoot.entries()) {
+        if (rootIndex > i) {
+          for (const [key] of entries) {
+            assert.strictEqual(await tree.has(key), false);
+            assert.strictEqual(await tree.get(key), null);
+            assert.strictEqual(tree.hasSync(key), false);
+            assert.strictEqual(tree.getSync(key), null);
+          }
+        } else {
+          for (const [key, value] of entries) {
+            assert.strictEqual(await tree.has(key), true);
+            assert.bufferEqual(await tree.get(key), value);
+            assert.strictEqual(tree.hasSync(key), true);
+            assert.bufferEqual(tree.getSync(key), value);
+          }
+        }
+      }
+    }
+
+    await tree.inject(last);
+
+    for (const [key, value] of entriesByRoot.flat()) {
+      assert.strictEqual(await tree.has(key), true);
+      assert.bufferEqual(await tree.get(key), value);
+      assert.strictEqual(tree.hasSync(key), true);
+      assert.bufferEqual(tree.getSync(key), value);
+    }
+
+    for (let i = ROOTS - 1; i >= 0; i--) {
+      // go to the past.
+      tree.injectSync(roots[i]);
+
+      for (const [rootIndex, entries] of entriesByRoot.entries()) {
+        if (rootIndex > i) {
+          for (const [key] of entries) {
+            assert.strictEqual(await tree.has(key), false);
+            assert.strictEqual(await tree.get(key), null);
+            assert.strictEqual(tree.hasSync(key), false);
+            assert.strictEqual(tree.getSync(key), null);
+          }
+        } else {
+          for (const [key, value] of entries) {
+            assert.strictEqual(await tree.has(key), true);
+            assert.bufferEqual(await tree.get(key), value);
+            assert.strictEqual(tree.hasSync(key), true);
+            assert.bufferEqual(tree.getSync(key), value);
+          }
+        }
+      }
+    }
+
+    tree.injectSync(last);
+
+    for (const [key, value] of entriesByRoot.flat()) {
+      assert.strictEqual(await tree.has(key), true);
+      assert.bufferEqual(await tree.get(key), value);
+      assert.strictEqual(tree.hasSync(key), true);
+      assert.bufferEqual(tree.getSync(key), value);
+    }
+  });
 });
