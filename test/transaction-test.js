@@ -129,4 +129,101 @@ describe('Urkel Transaction', function () {
     txn1.clearSync();
     assert.bufferEqual(txn1.rootHash(), NULL_HASH);
   });
+
+  it('should inject', async () => {
+    // 5 roots with 5 entries
+    const ROOTS = 5;
+    const ENTRIES = 5;
+    const roots = [];
+    const entriesByRoot = [];
+
+    const txn = tree.batch();
+    await txn.open();
+
+    for (let i = 0; i < ROOTS; i++) {
+      const entries = [];
+      for (let j = 0; j < ENTRIES; j++) {
+        const key = randomKey();
+        const value = Buffer.from(`value ${i * 10 + j}.`);
+
+        entries.push([key, value]);
+        await txn.insert(key, value);
+      }
+
+      roots.push(await txn.commit());
+      entriesByRoot.push(entries);
+    }
+
+    await txn.close();
+    const last = tree.rootHash();
+
+    const snap = tree.snapshot();
+    await snap.open();
+
+    for (let i = ROOTS - 1; i >= 0; i--) {
+      // go to the past.
+      await snap.inject(roots[i]);
+
+      for (const [rootIndex, entries] of entriesByRoot.entries()) {
+        if (rootIndex > i) {
+          for (const [key] of entries) {
+            assert.strictEqual(await snap.has(key), false);
+            assert.strictEqual(await snap.get(key), null);
+            assert.strictEqual(snap.hasSync(key), false);
+            assert.strictEqual(snap.getSync(key), null);
+          }
+        } else {
+          for (const [key, value] of entries) {
+            assert.strictEqual(await snap.has(key), true);
+            assert.bufferEqual(await snap.get(key), value);
+            assert.strictEqual(snap.hasSync(key), true);
+            assert.bufferEqual(snap.getSync(key), value);
+          }
+        }
+      }
+    }
+
+    await snap.inject(last);
+
+    for (const [key, value] of entriesByRoot.flat()) {
+      assert.strictEqual(await snap.has(key), true);
+      assert.bufferEqual(await snap.get(key), value);
+      assert.strictEqual(snap.hasSync(key), true);
+      assert.bufferEqual(snap.getSync(key), value);
+    }
+
+    for (let i = ROOTS - 1; i >= 0; i--) {
+      // go to the past.
+      snap.injectSync(roots[i]);
+
+      for (const [rootIndex, entries] of entriesByRoot.entries()) {
+        if (rootIndex > i) {
+          for (const [key] of entries) {
+            assert.strictEqual(await snap.has(key), false);
+            assert.strictEqual(await snap.get(key), null);
+            assert.strictEqual(snap.hasSync(key), false);
+            assert.strictEqual(snap.getSync(key), null);
+          }
+        } else {
+          for (const [key, value] of entries) {
+            assert.strictEqual(await snap.has(key), true);
+            assert.bufferEqual(await snap.get(key), value);
+            assert.strictEqual(snap.hasSync(key), true);
+            assert.bufferEqual(snap.getSync(key), value);
+          }
+        }
+      }
+    }
+
+    snap.injectSync(last);
+
+    for (const [key, value] of entriesByRoot.flat()) {
+      assert.strictEqual(await snap.has(key), true);
+      assert.bufferEqual(await snap.get(key), value);
+      assert.strictEqual(snap.hasSync(key), true);
+      assert.bufferEqual(snap.getSync(key), value);
+    }
+
+    await snap.close();
+  });
 });

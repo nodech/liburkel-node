@@ -69,6 +69,7 @@ static const char *inst_errors[] = {
 #define ERR_UNKNOWN "ERR_UNKNOWN"
 #define JS_ERR_INIT "Failed to initialize."
 #define JS_ERR_NOT_IMPL "Not implemented."
+#define JS_ERR_NOT_SUPPORTED "Not supported."
 #define JS_ERR_ARG "Invalid argument."
 #define JS_ERR_ALLOC "Allocation failed."
 #define JS_ERR_NODE "Node internal error."
@@ -399,6 +400,11 @@ typedef struct nurkel_tx_commit_worker_s {
 typedef struct nurkel_tx_clear_worker_s {
   WORKER_BASE_PROPS(nurkel_tx_t)
 } nurkel_tx_clear_worker_t;
+
+typedef struct nurkel_tx_inject_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t in_root[URKEL_HASH_SIZE];
+} nurkel_tx_inject_worker_t;
 
 #undef WORKER_BASE_PROPS
 
@@ -1435,14 +1441,14 @@ throw:
 NURKEL_METHOD(inject_sync) {
   napi_value result;
   napi_status status;
-  uint8_t root[URKEL_HASH_SIZE];
+  uint8_t in_root[URKEL_HASH_SIZE];
 
   NURKEL_ARGV(2);
   NURKEL_TREE_CONTEXT();
   NURKEL_TREE_READY();
-  NURKEL_JS_HASH_OK(argv[1], root);
+  NURKEL_JS_HASH_OK(argv[1], in_root);
 
-  if (!urkel_inject(ntree->tree, root))
+  if (!urkel_inject(ntree->tree, in_root))
     JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to inject_sync.");
 
   JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
@@ -1746,31 +1752,27 @@ NURKEL_METHOD(has) {
 }
 
 NURKEL_METHOD(insert_sync) {
+  (void)env;
+  (void)info;
   JS_THROW(JS_ERR_NOT_IMPL);
 }
 
-/* NURKEL_EXEC(insert) { */
-/* } */
-
-/* NURKEL_COMPLETE(insert) { */
-/* } */
-
 NURKEL_METHOD(insert) {
+  (void)env;
+  (void)info;
   JS_THROW(JS_ERR_NOT_IMPL);
 }
 
 NURKEL_METHOD(remove_sync) {
-  JS_THROW(JS_ERR_NOT_IMPL);
+  (void)env;
+  (void)info;
+  JS_THROW(JS_ERR_NOT_SUPPORTED);
 }
 
-/* NURKEL_EXEC(remove) { */
-/* } */
-
-/* NURKEL_COMPLETE(remove) { */
-/* } */
-
 NURKEL_METHOD(remove) {
-  JS_THROW(JS_ERR_NOT_IMPL);
+  (void)env;
+  (void)info;
+  JS_THROW(JS_ERR_NOT_SUPPORTED);
 }
 
 NURKEL_METHOD(prove_sync) {
@@ -3248,17 +3250,98 @@ NURKEL_METHOD(tx_clear) {
 }
 
 NURKEL_METHOD(tx_inject_sync) {
-  JS_THROW(JS_ERR_NOT_IMPL);
+  napi_value result;
+  napi_status status;
+  uint8_t in_root[URKEL_HASH_SIZE];
+
+  NURKEL_ARGV(2);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+  NURKEL_JS_HASH_OK(argv[1], in_root);
+
+  if (!urkel_tx_inject(ntx->tx, in_root))
+    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to tx_inject_sync.");
+
+  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
+  return result;
 }
 
-/* NURKEL_EXEC(tx_inject) { */
-/* } */
+NURKEL_EXEC(tx_inject) {
+  (void)env;
 
-/* NURKEL_COMPLETE(tx_inject) { */
-/* } */
+  nurkel_tx_inject_worker_t *worker = data;
+  nurkel_tx_t *ntx = worker->ctx;
+
+  if (!urkel_tx_inject(ntx->tx, worker->in_root)) {
+    worker->errno = urkel_errno;
+    worker->success = false;
+    return;
+  }
+
+  worker->success = true;
+}
+
+NURKEL_COMPLETE(tx_inject) {
+  napi_value result;
+  nurkel_tx_inject_worker_t *worker = data;
+  nurkel_tx_t *ntx = worker->ctx;
+
+  ntx->workers--;
+  if (status != napi_ok || worker->success == false) {
+    NAPI_OK(nurkel_create_error(env,
+                                worker->errno,
+                                "Failed to tx_inject.",
+                                &result));
+    NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+  } else {
+    NAPI_OK(napi_get_undefined(env, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  }
+
+  NAPI_OK(napi_delete_async_work(env, worker->work));
+  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
+  free(worker);
+}
 
 NURKEL_METHOD(tx_inject) {
-  JS_THROW(JS_ERR_NOT_IMPL);
+  napi_value result;
+  napi_status status;
+  nurkel_tx_inject_worker_t *worker;
+
+  NURKEL_ARGV(2);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+
+  worker = malloc(sizeof(nurkel_tx_inject_worker_t));
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
+  WORKER_INIT(worker);
+  worker->ctx = ntx;
+
+  NURKEL_JS_HASH(argv[1], worker->in_root);
+
+  if (status != napi_ok) {
+    free(worker);
+    JS_THROW(JS_ERR_ARG);
+  }
+
+  NURKEL_CREATE_ASYNC_WORK(tx_inject, worker, result);
+
+  if (status != napi_ok) {
+    free(worker);
+    JS_THROW(JS_ERR_NODE);
+  }
+
+  ntx->workers++;
+  status = napi_queue_async_work(env, worker->work);
+
+  if (status != napi_ok) {
+    ntx->workers--;
+    napi_delete_async_work(env, worker->work);
+    free(worker);
+    JS_THROW(JS_ERR_NODE);
+  }
+
+  return result;
 }
 
 
