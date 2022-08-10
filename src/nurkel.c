@@ -301,6 +301,14 @@ typedef struct nurkel_get_worker_s {
   size_t out_value_len;
 } nurkel_get_worker_t;
 
+typedef struct nurkel_hash_worker_s {
+  WORKER_BASE_PROPS(nurkel_tree_t)
+  uint8_t *in_data;
+  size_t in_data_len;
+
+  uint8_t out_hash[URKEL_HASH_SIZE];
+} nurkel_hash_worker_t;
+
 typedef struct nurkel_has_worker_s {
   WORKER_BASE_PROPS(nurkel_tree_t)
   uint8_t in_key[URKEL_HASH_SIZE];
@@ -1320,14 +1328,98 @@ NURKEL_METHOD(hash_sync) {
   return result;
 }
 
-/* NURKEL_EXEC(hash) { */
-/* } */
+NURKEL_EXEC(hash) {
+  (void)env;
 
-/* NURKEL_COMPLETE(hash) { */
-/* } */
+  nurkel_hash_worker_t *worker = data;
+
+  urkel_hash(worker->out_hash, worker->in_data, worker->in_data_len);
+  worker->success = true;
+}
+
+NURKEL_COMPLETE(hash) {
+  napi_value result;
+  nurkel_hash_worker_t *worker = data;
+
+  if (status != napi_ok || worker->success == false) {
+    NAPI_OK(nurkel_create_error(env,
+                                worker->errno,
+                                "Failed to hash.",
+                                &result));
+    NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+  } else {
+    NAPI_OK(napi_create_buffer_copy(env,
+                                    URKEL_HASH_SIZE,
+                                    worker->out_hash,
+                                    NULL,
+                                    &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  }
+
+  NAPI_OK(napi_delete_reference(env, worker->ref));
+  NAPI_OK(napi_delete_async_work(env, worker->work));
+  free(worker);
+}
 
 NURKEL_METHOD(hash) {
-  JS_THROW(JS_ERR_NOT_IMPL);
+  napi_value result;
+  napi_status status;
+  bool is_buffer;
+  char *err;
+  nurkel_hash_worker_t *worker;
+
+  NURKEL_ARGV(1);
+
+  JS_NAPI_OK(napi_is_buffer(env, argv[0], &is_buffer), JS_ERR_ARG);
+  JS_ASSERT(is_buffer == true, JS_ERR_ARG);
+
+  worker = malloc(sizeof(nurkel_hash_worker_t));
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
+  WORKER_INIT(worker);
+
+  /* Move instead of copy */
+  status = napi_get_buffer_info(env,
+                                argv[0],
+                                (void **)&worker->in_data,
+                                &worker->in_data_len);
+
+  if (status != napi_ok) {
+    err = JS_ERR_ARG;
+    goto throw;
+  }
+
+  /* Make sure buffer does not get freed while we are working with it. */
+  status = napi_create_reference(env, argv[0], 1, &worker->ref);
+
+  if (status != napi_ok) {
+    err = JS_ERR_NODE;
+    goto throw;
+  }
+
+  NURKEL_CREATE_ASYNC_WORK(hash, worker, result);
+
+  if (status != napi_ok) {
+    err = JS_ERR_NODE;
+    goto throw;
+  }
+
+  status = napi_queue_async_work(env, worker->work);
+
+  if (status != napi_ok) {
+    err = JS_ERR_NODE;
+    goto throw;
+  }
+
+  return result;
+throw:
+  if (worker->work != NULL)
+    napi_delete_async_work(env, worker->work);
+
+  if (worker->ref != NULL)
+    napi_delete_reference(env, worker->ref);
+
+  free(worker);
+  JS_THROW(err);
 }
 
 NURKEL_METHOD(inject_sync) {
@@ -2097,6 +2189,10 @@ nurkel_tx_close_work(nurkel_tx_close_params_t *params) {
   nurkel_tx_close_worker_t *worker;
   nurkel_tx_t *ntx = params->ctx;
 
+  /* TODO: Dive into segfault here.
+   * Possible scenario?
+   *   ntx is freed before even get here from the nurkel_close_work_txs?.
+   */
   if (ntx->is_closing || ntx->should_close)
     return napi_ok;
 
