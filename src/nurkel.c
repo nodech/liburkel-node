@@ -695,8 +695,11 @@ nurkel_unregister_tx(nurkel_tx_t *ntx) {
   if (ntree->tx_len == 0)
     ntree->tx_head = NULL;
 
-  if (entry->prev != NULL)
+  if (entry->prev != NULL) {
     entry->prev->next = entry->next;
+  } else {
+    ntree->tx_head = entry->next;
+  }
 
   if (entry->next != NULL)
     entry->next->prev = entry->prev;
@@ -994,8 +997,14 @@ nurkel_close_work(nurkel_close_params_t params) {
   nurkel_close_worker_t *worker;
   nurkel_tree_t *ntree = params.ctx;
 
-  if (ntree->is_closing || ntree->should_close)
+  if (ntree->is_closing || ntree->should_close) {
+    if (params.promise) {
+      return napi_throw_error(params.env,
+                              "",
+                              "Failed to close, it is already closing.");
+    }
     return napi_ok;
+  }
 
   status = napi_create_string_latin1(params.env,
                                      "nurkel_close",
@@ -2073,9 +2082,6 @@ nurkel_tx_destroy(napi_env env, void *data, void *hint) {
   nurkel_tx_t *ntx = data;
   nurkel_tree_t *ntree = ntx->ntree;
 
-  /* We only allow tree to go out of scope after all txs go out of scope. */
-  NAPI_OK(napi_reference_unref(env, ntree->ref, NULL));
-
   if (ntree->is_closing) {
     ntx->should_cleanup = true;
     return;
@@ -2101,6 +2107,9 @@ nurkel_tx_destroy(napi_env env, void *data, void *hint) {
   }
 
   nurkel_close_try_close(env, ntree);
+  /* We only allow tree to go out of scope after all txs go out of scope. */
+  NAPI_OK(napi_reference_unref(env, ntree->ref, NULL));
+
   free(ntx);
 }
 
@@ -2281,12 +2290,21 @@ nurkel_tx_close_work(nurkel_tx_close_params_t params) {
   nurkel_tx_close_worker_t *worker;
   nurkel_tx_t *ntx = params.ctx;
 
+  CHECK(ntx != NULL);
+
   /* TODO: Dive into segfault here.
    * Possible scenario?
    *   ntx is freed before even get here from the nurkel_close_work_txs?.
    */
-  if (ntx->is_closing || ntx->should_close)
+  if (ntx->is_closing || ntx->should_close) {
+    if (params.promise) {
+      return napi_throw_error(params.env,
+                              "",
+                              "Failed to tx_close, it is already closing.");
+    }
+
     return napi_ok;
+  }
 
   status = napi_create_string_latin1(params.env,
                                      "nurkel_tx_close",
@@ -2384,8 +2402,10 @@ NURKEL_COMPLETE(tx_close) {
   NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_close_try_close(env, ntree));
 
-  if (worker->in_destroy || ntx->should_cleanup)
+  if (worker->in_destroy || ntx->should_cleanup) {
+    NAPI_OK(napi_reference_unref(env, ntree->ref, NULL));
     free(ntx);
+  }
   free(worker);
 }
 
