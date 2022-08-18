@@ -15,10 +15,10 @@ index eb674d1..a718c40 100644
  urkel_prove(urkel_t *tree,
              unsigned char **proof_raw,
 diff --git a/deps/liburkel/src/tree.c b/deps/liburkel/src/tree.c
-index f0ec649..ce8f451 100644
+index f0ec649..87eab95 100644
 --- a/deps/liburkel/src/tree.c
 +++ b/deps/liburkel/src/tree.c
-@@ -476,6 +476,144 @@ urkel_tree_prove(tree_db_t *tree,
+@@ -476,6 +476,153 @@ urkel_tree_prove(tree_db_t *tree,
    }
  }
  
@@ -123,7 +123,16 @@ index f0ec649..ce8f451 100644
 +  int ret = 1;
 +
 +  dst = urkel_open(dst_prefix);
++
++  if (dst == NULL)
++    return 0;
++
 +  src = urkel_open(src_prefix);
++
++  if (src == NULL) {
++    urkel_close(src);
++    return 0;
++  }
 +
 +  if (hash == NULL)
 +    root_hash = src->hash;
