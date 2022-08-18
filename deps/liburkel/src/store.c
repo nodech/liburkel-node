@@ -21,7 +21,7 @@
  */
 
 /* Max read size on linux, and lower than off_t max. */
-#define MAX_FILE_SIZE 0x9ff000 /* File max = 10 MB */
+#define MAX_FILE_SIZE 0x7ffff000 /* File max = 2 GB */
 #define MAX_FILES 0x7fff /* DB max = 64 TB. */
 #define MAX_OPEN_FILES 32
 #define META_SIZE (4 + (URKEL_PTR_SIZE * 2) + 20)
