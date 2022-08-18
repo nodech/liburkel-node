@@ -25,6 +25,7 @@
   },
   "gypfile": true,
   "dependencies": {
+    "bfile": "^0.2.2",
     "bsert": "^0.0.10",
     "loady": "^0.0.5"
   }

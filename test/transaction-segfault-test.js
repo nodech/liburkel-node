@@ -17,7 +17,8 @@ describe('Urkel Transaction (segfault)', function () {
   });
 
   afterEach(async () => {
-    await tree.close();
+    if (tree.isOpen)
+      await tree.close();
 
     if (fs.existsSync(prefix))
       rmTreeDir(prefix);
@@ -29,14 +30,10 @@ describe('Urkel Transaction (segfault)', function () {
     await txn.close();
 
     txn = tree.txn();
-    console.log('tx open');
     await txn.open();
     const snap = tree.snapshot();
-    console.log('snap open');
     await snap.open();
-    console.log('snap close');
     await snap.close();
-    console.log('tree close');
     await tree.close();
   });
 });

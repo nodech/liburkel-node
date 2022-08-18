@@ -100,6 +100,13 @@ static const char *inst_errors[] = {
   return NULL;                                            \
 } while(0)
 
+#define JS_ASSERT_GOTO_THROW(cond, msg) do { \
+  if (!(cond)) {                             \
+    err = msg;                               \
+    goto throw;                              \
+  }                                          \
+} while(0)
+
 #define JS_ASSERT(cond, msg) if (!(cond)) JS_THROW(msg)
 #define JS_NAPI_OK(status, msg) JS_ASSERT(status == napi_ok, msg)
 
@@ -330,7 +337,7 @@ typedef struct nurkel_prove_worker_s {
 } nurkel_prove_worker_t;
 
 typedef struct nurkel_verify_worker_s {
-  WORKER_BASE_PROPS(nurkel_tree_t)
+  WORKER_BASE_PROPS(void)
   uint8_t in_root[URKEL_HASH_SIZE];
   uint8_t in_key[URKEL_HASH_SIZE];
   uint8_t *in_proof;
@@ -340,6 +347,22 @@ typedef struct nurkel_verify_worker_s {
   uint8_t out_value[URKEL_VALUE_SIZE];
   size_t out_value_len;
 } nurkel_verify_worker_t;
+
+typedef struct nurkel_compact_worker_s {
+  WORKER_BASE_PROPS(void)
+  char *in_src;
+  size_t in_src_len;
+  char *in_dst;
+  size_t in_dst_len;
+  uint8_t *in_root;
+} nurkel_compact_worker_t;
+
+typedef struct nurkel_stat_worker_s {
+  WORKER_BASE_PROPS(void)
+  char *in_prefix;
+  size_t in_prefix_len;
+  urkel_tree_stat_t out_st;
+} nurkel_stat_worker_t;
 
 /* Transaction workers */
 
@@ -1261,6 +1284,7 @@ NURKEL_EXEC(destroy) {
 
   if (!urkel_destroy(worker->in_path)) {
     worker->err_res = urkel_errno;
+    worker->success = false;
     return;
   }
 
@@ -1291,38 +1315,39 @@ NURKEL_METHOD(destroy) {
   napi_value result;
   napi_status status;
   nurkel_destroy_worker_t *worker;
+  char *err;
 
   NURKEL_ARGV(1);
 
   worker = malloc(sizeof(nurkel_destroy_worker_t));
-  JS_ASSERT(worker != NULL, JS_ERR_NODE);
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
   WORKER_INIT(worker);
   worker->in_path = NULL;
   worker->in_path_len = 0;
 
-  JS_NAPI_OK(read_value_string_latin1(env,
-                                      argv[0],
-                                      &worker->in_path,
-                                      &worker->in_path_len), JS_ERR_NODE);
+  status = read_value_string_latin1(env,
+                                    argv[0],
+                                    &worker->in_path,
+                                    &worker->in_path_len);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_ARG);
 
   NURKEL_CREATE_ASYNC_WORK(destroy, worker, result);
-
-  if (status != napi_ok) {
-    free(worker->in_path);
-    free(worker);
-    JS_THROW(JS_ERR_NODE);
-  }
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
 
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
     napi_delete_async_work(env, worker->work);
-    free(worker->in_path);
-    free(worker);
-    JS_THROW(JS_ERR_NODE);
+    JS_ASSERT_GOTO_THROW(false, JS_ERR_NODE);
   }
 
   return result;
+throw:
+  if (worker->in_path != NULL)
+    free(worker->in_path);
+
+  free(worker);
+  JS_THROW(err);
 }
 
 NURKEL_METHOD(hash_sync) {
@@ -2020,16 +2045,10 @@ NURKEL_METHOD(verify) {
   }
 
   NURKEL_JS_HASH(argv[0], worker->in_root);
-  if (status != napi_ok) {
-    err = JS_ERR_ARG;
-    goto throw;
-  }
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_ARG);
 
   NURKEL_JS_HASH(argv[1], worker->in_key);
-  if (status != napi_ok) {
-    err = JS_ERR_ARG;
-    goto throw;
-  }
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_ARG);
 
   status = nurkel_get_buffer_copy(env,
                                   argv[2],
@@ -2037,31 +2056,275 @@ NURKEL_METHOD(verify) {
                                   &worker->in_proof_len,
                                   proof_len,
                                   false);
-
-  if (status != napi_ok) {
-    err = JS_ERR_ARG;
-    goto throw;
-  }
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_ARG);
 
   NURKEL_CREATE_ASYNC_WORK(verify, worker, result);
-
-  if (status != napi_ok) {
-    err = JS_ERR_NODE;
-    goto throw;
-  }
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
 
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
     napi_delete_async_work(env, worker->work);
-    err = JS_ERR_NODE;
-    goto throw;
+    JS_ASSERT_GOTO_THROW(false, JS_ERR_NODE);
   }
 
   return result;
 
 throw:
   free(worker->in_proof);
+  free(worker);
+  JS_THROW(err);
+}
+
+NURKEL_METHOD(compact_sync) {
+  napi_value result;
+  napi_status status;
+  char *src = NULL, *dst = NULL;
+  size_t src_len, dst_len;
+  uint8_t root[URKEL_HASH_SIZE];
+  uint8_t *root_ptr = NULL;
+  napi_valuetype type;
+
+  NURKEL_ARGV(3);
+
+  JS_NAPI_OK(napi_typeof(env, argv[2], &type), JS_ERR_ARG);
+
+  if (type != napi_null && type != napi_undefined) {
+    NURKEL_JS_HASH_OK(argv[2], root);
+    root_ptr = root;
+  }
+
+  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
+  JS_NAPI_OK(read_value_string_latin1(env,
+                                      argv[0],
+                                      &src,
+                                      &src_len), JS_ERR_ARG);
+
+  status = read_value_string_latin1(env,
+                                    argv[1],
+                                    &dst,
+                                    &dst_len);
+
+  if (status != napi_ok) {
+    free(src);
+    JS_THROW(JS_ERR_ARG);
+  }
+
+  if (!urkel_compact(dst, src, root_ptr)) {
+    free(src);
+    free(dst);
+    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to compact_sync.");
+  }
+
+  return result;
+}
+
+NURKEL_EXEC(compact) {
+  (void)env;
+
+  nurkel_compact_worker_t *worker = data;
+
+  if (!urkel_compact(worker->in_dst, worker->in_src, worker->in_root)) {
+    worker->success = false;
+    worker->err_res = urkel_errno;
+    return;
+  }
+
+  worker->success = true;
+}
+
+NURKEL_COMPLETE(compact) {
+  napi_value result;
+  nurkel_compact_worker_t *worker = data;
+
+  if (status != napi_ok || worker->success == false) {
+    NAPI_OK(nurkel_create_error(env,
+                                worker->err_res,
+                                "Failed to compact.",
+                                &result));
+    NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+  } else {
+    NAPI_OK(napi_get_undefined(env, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  }
+
+  free(worker->in_root);
+  free(worker->in_dst);
+  free(worker->in_src);
+  free(worker);
+}
+
+NURKEL_METHOD(compact) {
+  napi_value result;
+  napi_status status;
+  napi_valuetype type;
+  char *err;
+  nurkel_compact_worker_t *worker = NULL;
+  uint8_t *in_root = NULL;
+
+  NURKEL_ARGV(3);
+
+  JS_NAPI_OK(napi_typeof(env, argv[2], &type), JS_ERR_ARG);
+
+  worker = malloc(sizeof(nurkel_compact_worker_t));
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
+  WORKER_INIT(worker);
+  worker->in_root = NULL;
+
+  if (type != napi_null && type != napi_undefined) {
+    in_root = malloc(URKEL_HASH_SIZE);
+    JS_ASSERT_GOTO_THROW(in_root != NULL, JS_ERR_ALLOC);
+
+    NURKEL_JS_HASH_OK(argv[2], in_root);
+    worker->in_root = in_root;
+  }
+
+  status = read_value_string_latin1(env,
+                                    argv[0],
+                                    &worker->in_src,
+                                    &worker->in_src_len);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_ARG);
+
+  status = read_value_string_latin1(env,
+                                    argv[1],
+                                    &worker->in_dst,
+                                    &worker->in_dst_len);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_ARG);
+
+  NURKEL_CREATE_ASYNC_WORK(compact, worker, result);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  status = napi_queue_async_work(env, worker->work);
+
+  if (status != napi_ok) {
+    napi_delete_async_work(env, worker->work);
+    JS_ASSERT_GOTO_THROW(false, JS_ERR_NODE);
+  }
+
+  return result;
+
+throw:
+  if (in_root != NULL)
+    free(in_root);
+
+  free(worker);
+
+  JS_THROW(err);
+}
+
+NURKEL_METHOD(stat_sync) {
+  napi_value result, result_size, result_files;
+  napi_status status;
+  char *err;
+  char *in_prefix;
+  size_t in_prefix_len;
+  urkel_tree_stat_t st = {0};
+
+  NURKEL_ARGV(1);
+
+  JS_NAPI_OK(read_value_string_latin1(env,
+                                      argv[0],
+                                      &in_prefix,
+                                      &in_prefix_len), JS_ERR_ARG);
+
+  if (!urkel_stat(in_prefix, &st)) {
+    free(in_prefix);
+    JS_THROW(urkel_errors[urkel_errno - 1]);
+  }
+
+  status = napi_create_object(env, &result);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  status = napi_create_int64(env, st.size, &result_size);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  status = napi_create_int64(env, st.files, &result_files);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  status = napi_set_named_property(env, result, "size", result_size);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  status = napi_set_named_property(env, result, "files", result_files);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  return result;
+
+throw:
+  free(in_prefix);
+  JS_THROW(err);
+}
+
+NURKEL_EXEC(stat) {
+  (void)env;
+
+  nurkel_stat_worker_t *worker = data;
+
+  if (!urkel_stat(worker->in_prefix, &worker->out_st)) {
+    worker->err_res = urkel_errno;
+    worker->success = false;
+    return;
+  }
+
+  worker->success = true;
+}
+
+NURKEL_COMPLETE(stat) {
+  napi_value result, result_size, result_files;
+  nurkel_stat_worker_t *worker = data;
+
+  if (status != napi_ok || worker->success == false) {
+    NAPI_OK(nurkel_create_error(env,
+                                worker->err_res,
+                                "Failed to stat.",
+                                &result));
+    NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+  } else {
+    NAPI_OK(napi_create_object(env, &result));
+    NAPI_OK(napi_create_int64(env, worker->out_st.size, &result_size));
+    NAPI_OK(napi_create_int64(env, worker->out_st.files, &result_files));
+    NAPI_OK(napi_set_named_property(env, result, "size", result_size));
+    NAPI_OK(napi_set_named_property(env, result, "files", result_files));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  }
+
+  free(worker->in_prefix);
+  free(worker);
+}
+
+NURKEL_METHOD(stat) {
+  napi_value result;
+  napi_status status;
+  nurkel_stat_worker_t *worker;
+  char *err;
+
+  NURKEL_ARGV(1);
+
+  worker = malloc(sizeof(nurkel_stat_worker_t));
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
+  WORKER_INIT(worker);
+  worker->out_st.files = 0;
+  worker->out_st.size = 0;
+
+  status = read_value_string_latin1(env,
+                                    argv[0],
+                                    &worker->in_prefix,
+                                    &worker->in_prefix_len);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_ARG);
+
+  NURKEL_CREATE_ASYNC_WORK(stat, worker, result);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  status = napi_queue_async_work(env, worker->work);
+
+  if (status != napi_ok) {
+    napi_delete_async_work(env, worker->work);
+    JS_ASSERT_GOTO_THROW(false, JS_ERR_NODE);
+  }
+
+  return result;
+
+throw:
+  free(worker->in_prefix);
   free(worker);
   JS_THROW(err);
 }
@@ -3406,6 +3669,10 @@ NAPI_MODULE_INIT() {
     F(prove),
     F(verify_sync),
     F(verify),
+    F(compact_sync),
+    F(compact),
+    F(stat_sync),
+    F(stat),
 
     /* TX Methods */
     F(tx_init),

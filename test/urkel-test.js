@@ -444,12 +444,12 @@ describe('Urkel radix', function() {
 
     // No stats currently. TODO: Maybe introduce these
     // in liburkel ?
-    // {
-    //   const stat1 = await tree.store.stat();
-    //   await tree.compact();
-    //   const stat2 = await tree.store.stat();
-    //   assert(stat1.size > stat2.size);
-    // }
+    {
+      const stat1 = await tree.stat();
+      await tree.compact();
+      const stat2 = await tree.stat();
+      assert(stat1.size > stat2.size);
+    }
 
     const rand = items.slice(0, items.length >>> 1);
 
