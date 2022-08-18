@@ -1,0 +1,283 @@
+diff --git a/deps/liburkel/include/urkel.h b/deps/liburkel/include/urkel.h
+index eb674d1..26ea25d 100644
+--- a/deps/liburkel/include/urkel.h
++++ b/deps/liburkel/include/urkel.h
+@@ -48,6 +48,11 @@ typedef struct urkel_s urkel_t;
+ typedef struct urkel_tx_s urkel_tx_t;
+ typedef struct urkel_iter_s urkel_iter_t;
+ 
++typedef struct urkel_tree_stat_s {
++  size_t files; /* Number of files in the tree (except meta). */
++  size_t size;  /* Total size of all files (except meta), in bytes. */
++} urkel_tree_stat_t;
++
+ /*
+  * Error Number
+  */
+@@ -84,6 +89,9 @@ urkel_close(urkel_t *tree);
+ URKEL_EXTERN int
+ urkel_destroy(const char *prefix);
+ 
++URKEL_EXTERN int
++urkel_stat(const char *prefix, urkel_tree_stat_t *stat);
++
+ URKEL_EXTERN int
+ urkel__corrupt(const char *prefix);
+ 
+diff --git a/deps/liburkel/src/store.c b/deps/liburkel/src/store.c
+index 24af568..454814f 100644
+--- a/deps/liburkel/src/store.c
++++ b/deps/liburkel/src/store.c
+@@ -7,6 +7,7 @@
+ #include <stdlib.h>
+ #include <stdint.h>
+ #include <string.h>
++#include <urkel.h>
+ #include "bits.h"
+ #include "internal.h"
+ #include "khash.h"
+@@ -1149,6 +1150,58 @@ urkel_store_close(data_store_t *store) {
+   free(store);
+ }
+ 
++int
++urkel_store_stat(const char *prefix, urkel_tree_stat_t *stat) {
++  char *prefix_ = urkel_path_resolve(prefix);
++  char path[URKEL_PATH_MAX + 1];
++  size_t path_len;
++  urkel_dirent_t **list;
++  urkel_stat_t st;
++  size_t i, count;
++  int ret = 0;
++
++  if (prefix_ == NULL)
++    return 0;
++
++  path_len = strlen(prefix_);
++
++  if (path_len + 10 > URKEL_PATH_MAX)
++    goto fail;
++
++  memcpy(path, prefix_, path_len + 1);
++
++  path[path_len++] = URKEL_PATH_SEP;
++
++  if (!urkel_fs_scandir(prefix_, &list, &count))
++    goto fail;
++
++  for (i = 0; i < count; i++) {
++    const char *name = list[i]->d_name;
++
++    if (urkel_parse_u32(NULL, name)) {
++      memcpy(path + path_len, name, strlen(name) + 1);
++      if (!urkel_fs_stat(path, &st))
++        goto loop_fail;
++
++      stat->files++;
++      stat->size += st.st_size;
++    }
++  }
++
++  ret = 1;
++
++loop_fail:
++  for (i = 0; i < count; i++)
++    free(list[i]);
++
++  free(list);
++
++fail:
++  free(prefix_);
++
++  return ret;
++}
++
+ int
+ urkel_store_destroy(const char *prefix) {
+   char *prefix_ = urkel_path_resolve(prefix);
+diff --git a/deps/liburkel/src/store.h b/deps/liburkel/src/store.h
+index bf3848a..d38c97c 100644
+--- a/deps/liburkel/src/store.h
++++ b/deps/liburkel/src/store.h
+@@ -31,6 +31,9 @@ urkel_store_close(urkel_store_t *store);
+ int
+ urkel_store_destroy(const char *prefix);
+ 
++int
++urkel_store_stat(const char *prefix, urkel_tree_stat_t *stat);
++
+ int
+ urkel_store__corrupt(const char *prefix);
+ 
+diff --git a/deps/liburkel/src/tree.c b/deps/liburkel/src/tree.c
+index f0ec649..ea9c532 100644
+--- a/deps/liburkel/src/tree.c
++++ b/deps/liburkel/src/tree.c
+@@ -620,6 +620,16 @@ urkel_destroy(const char *prefix) {
+   return 1;
+ }
+ 
++int
++urkel_stat(const char *prefix, urkel_tree_stat_t *stat) {
++  if (!urkel_store_stat(prefix, stat)) {
++    urkel_errno = URKEL_ECORRUPTION;
++    return 0;
++  }
++
++  return 1;
++}
++
+ int
+ urkel__corrupt(const char *prefix) {
+   if (!urkel_store__corrupt(prefix)) {
+diff --git a/deps/liburkel/test/test.c b/deps/liburkel/test/test.c
+index 5ff9615..daae7e6 100644
+--- a/deps/liburkel/test/test.c
++++ b/deps/liburkel/test/test.c
+@@ -34,6 +34,7 @@ test_memcmp(void) {
+ static void
+ test_urkel_sanity(void) {
+   urkel_kv_t *kvs = urkel_kv_generate(URKEL_ITERATIONS);
++  urkel_tree_stat_t old_tst = {0};
+   unsigned char old_root[32];
+   unsigned char old_root2[32];
+   urkel_tx_t *tx;
+@@ -46,6 +47,14 @@ test_urkel_sanity(void) {
+ 
+   ASSERT(db != NULL);
+ 
++  {
++    urkel_tree_stat_t tst = {0};
++    urkel_stat(URKEL_PATH, &tst);
++    ASSERT(tst.files == 1);
++    ASSERT(tst.size == 0);
++    old_tst = tst;
++  }
++
+   tx = urkel_tx_create(db, NULL);
+ 
+   ASSERT(tx != NULL);
+@@ -65,12 +74,32 @@ test_urkel_sanity(void) {
+     ASSERT(result_len == 64);
+     ASSERT(urkel_memcmp(result, value, 64) == 0);
+ 
+-    if ((i & 15) == 0)
++    if ((i & 15) == 0) {
++      urkel_tree_stat_t before_tst = {0};
++      urkel_tree_stat_t after_tst = {0};
++      urkel_stat(URKEL_PATH, &before_tst);
++      ASSERT(old_tst.files == before_tst.files);
++      ASSERT(old_tst.size == before_tst.size);
++
+       ASSERT(urkel_tx_commit(tx));
++
++      urkel_stat(URKEL_PATH, &after_tst);
++      ASSERT(old_tst.files == after_tst.files);
++      ASSERT(old_tst.size < after_tst.size);
++      old_tst = after_tst;
++    }
+   }
+ 
+   ASSERT(urkel_tx_commit(tx));
+ 
++  {
++    urkel_tree_stat_t tst = {0};
++    urkel_stat(URKEL_PATH, &tst);
++    ASSERT(old_tst.files <= tst.files);
++    ASSERT(old_tst.size < tst.size);
++    old_tst = tst;
++  }
++
+   for (i = 0; i < URKEL_ITERATIONS; i++) {
+     unsigned char *key = kvs[i].key;
+     unsigned char *value = kvs[i].value;
+@@ -87,10 +116,25 @@ test_urkel_sanity(void) {
+   urkel_tx_destroy(tx);
+   urkel_close(db);
+ 
++  {
++    urkel_tree_stat_t tst = {0};
++    urkel_stat(URKEL_PATH, &tst);
++    ASSERT(old_tst.files == tst.files);
++    ASSERT(old_tst.size == tst.size);
++    old_tst = tst;
++  }
+   db = urkel_open(URKEL_PATH);
+ 
+   ASSERT(db != NULL);
+ 
++  {
++    urkel_tree_stat_t tst = {0};
++    urkel_stat(URKEL_PATH, &tst);
++    ASSERT(old_tst.files == tst.files);
++    ASSERT(old_tst.size == tst.size);
++    old_tst = tst;
++  }
++
+   tx = urkel_tx_create(db, NULL);
+ 
+   ASSERT(tx != NULL);
+@@ -132,6 +176,14 @@ test_urkel_sanity(void) {
+     urkel_iter_destroy(iter);
+   }
+ 
++  {
++    urkel_tree_stat_t tst = {0};
++    urkel_stat(URKEL_PATH, &tst);
++    ASSERT(old_tst.files == tst.files);
++    ASSERT(old_tst.size == tst.size);
++    old_tst = tst;
++  }
++
+   for (i = 0; i < URKEL_ITERATIONS; i++) {
+     unsigned char root[32];
+     unsigned char *key = kvs[i].key;
+@@ -156,6 +208,14 @@ test_urkel_sanity(void) {
+ 
+   urkel_root(db, old_root);
+ 
++  {
++    urkel_tree_stat_t tst = {0};
++    urkel_stat(URKEL_PATH, &tst);
++    ASSERT(old_tst.files == tst.files);
++    ASSERT(old_tst.size == tst.size);
++    old_tst = tst;
++  }
++
+   for (i = 0; i < URKEL_ITERATIONS; i++) {
+     unsigned char *key = kvs[i].key;
+ 
+@@ -166,8 +226,19 @@ test_urkel_sanity(void) {
+     }
+ 
+     if (i == URKEL_ITERATIONS / 2) {
++      urkel_tree_stat_t before_tst = {0};
++      urkel_tree_stat_t after_tst = {0};
++      urkel_stat(URKEL_PATH, &before_tst);
++      ASSERT(old_tst.files == before_tst.files);
++      ASSERT(old_tst.size == before_tst.size);
++
+       ASSERT(urkel_tx_commit(tx));
+       urkel_tx_root(tx, old_root2);
++
++      urkel_stat(URKEL_PATH, &after_tst);
++      ASSERT(old_tst.files == after_tst.files);
++      ASSERT(old_tst.size < after_tst.size);
++      old_tst = after_tst;
+     }
+   }
+ 
+@@ -220,6 +291,13 @@ test_urkel_sanity(void) {
+   }
+ 
+   ASSERT(urkel_tx_commit(tx));
++  {
++    urkel_tree_stat_t tst = {0};
++    urkel_stat(URKEL_PATH, &tst);
++    ASSERT(old_tst.files == tst.files);
++    ASSERT(old_tst.size < tst.size);
++    old_tst = tst;
++  }
+ 
+   {
+     urkel_iter_t *iter = urkel_iter_create(tx);
