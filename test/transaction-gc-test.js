@@ -3,7 +3,7 @@
 const assert = require('bsert');
 const fs = require('fs');
 const {testdir, isTreeDir, rmTreeDir, randomKey} = require('./util/common');
-const {Tree} = require('../lib/tree');
+const {Tree} = require('..');
 
 describe('Urkel Transaction (GC)', function () {
   if (!global.gc)
@@ -37,7 +37,7 @@ describe('Urkel Transaction (GC)', function () {
     await tree.open();
 
     const transaction = tree.transaction();
-    await transaction.maybeOpen();
+    await transaction.open();
     await transaction.close();
 
     await tree.close();
@@ -49,14 +49,14 @@ describe('Urkel Transaction (GC)', function () {
     // Make sure it goes out of scope
     await (async () => {
       const transaction = tree.transaction();
-      await transaction.maybeOpen();
+      await transaction.open();
     })();
 
     global.gc();
     await (async () => {
       const transaction = tree.transaction();
       // Don't wait
-      transaction.maybeOpen();
+      transaction.open();
     })();
 
     global.gc();
@@ -93,7 +93,7 @@ describe('Urkel Transaction (GC)', function () {
 
       // Open and wait 5.
       if (i < 5) {
-        await txns[i].maybeOpen();
+        await txns[i].open();
       }
 
       // wait close 2.
@@ -108,7 +108,7 @@ describe('Urkel Transaction (GC)', function () {
 
       // don't wait open >5
       if (i >= 5)
-        txns[i].maybeOpen();
+        txns[i].open();
     }
 
     await tree.close();
@@ -138,12 +138,12 @@ describe('Urkel Transaction (GC)', function () {
     await (async () => {
       for (let i = 0; i < 100; i++) {
         const txn = await tree.txn();
-        await txn.maybeOpen();
+        await txn.open();
       }
 
       for (let i = 0; i < 100; i++) {
         const txn = await tree.txn();
-        await txn.maybeOpen();
+        await txn.open();
         txn.close();
       }
     })();
@@ -156,7 +156,7 @@ describe('Urkel Transaction (GC)', function () {
     await tree.open();
 
     const txn1 = tree.txn();
-    await txn1.maybeOpen();
+    await txn1.open();
     const keys = [];
     global.gc();
     let lastUsage = process.memoryUsage();

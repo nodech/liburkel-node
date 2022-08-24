@@ -3,11 +3,12 @@
 const assert = require('bsert');
 const fs = require('fs');
 const {testdir, rmTreeDir, randomKey} = require('./util/common');
-const {Tree} = require('../lib/tree');
+const nurkel = require('..');
 
 const NULL_HASH = Buffer.alloc(32, 0);
 
-describe('Urkel Transaction', function () {
+for (const memory of [false, true]) {
+describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
   if (!global.gc)
     this.skip();
 
@@ -15,9 +16,11 @@ describe('Urkel Transaction', function () {
 
   beforeEach(async () => {
     prefix = testdir('tx');
-    fs.mkdirSync(prefix);
 
-    tree = new Tree({prefix});
+    if (!memory)
+      fs.mkdirSync(prefix);
+
+    tree = nurkel.create({ memory, prefix });
     await tree.open();
   });
 
@@ -30,13 +33,16 @@ describe('Urkel Transaction', function () {
 
   it('should get the root', async () => {
     const txn1 = tree.txn();
-    await txn1.maybeOpen();
+    await txn1.open();
 
     assert.bufferEqual(txn1.txRootHashSync(), NULL_HASH);
     assert.bufferEqual(await txn1.txRootHash(), NULL_HASH);
   });
 
   it('should insert and get the key (sync)', async () => {
+    if (!tree.supportsSync)
+      this.skip();
+
     const txn1 = tree.txn();
     await txn1.open();
 
@@ -94,9 +100,13 @@ describe('Urkel Transaction', function () {
     for (const keyHex of pairs.keys()) {
       const key = Buffer.from(keyHex, 'hex');
       const proof = await txn1.prove(key);
-      const proofS = txn1.proveSync(key);
 
-      assert.bufferEqual(proof, proofS);
+      assert(Buffer.isBuffer(proof));
+
+      if (tree.supportsSync) {
+        const proofS = txn1.proveSync(key);
+        assert.bufferEqual(proof, proofS);
+      }
     }
 
     await txn1.close();
@@ -169,15 +179,19 @@ describe('Urkel Transaction', function () {
           for (const [key] of entries) {
             assert.strictEqual(await snap.has(key), false);
             assert.strictEqual(await snap.get(key), null);
-            assert.strictEqual(snap.hasSync(key), false);
-            assert.strictEqual(snap.getSync(key), null);
+            if (tree.supportsSync) {
+              assert.strictEqual(snap.hasSync(key), false);
+              assert.strictEqual(snap.getSync(key), null);
+            }
           }
         } else {
           for (const [key, value] of entries) {
             assert.strictEqual(await snap.has(key), true);
             assert.bufferEqual(await snap.get(key), value);
-            assert.strictEqual(snap.hasSync(key), true);
-            assert.bufferEqual(snap.getSync(key), value);
+            if (tree.supportsSync) {
+              assert.strictEqual(snap.hasSync(key), true);
+              assert.bufferEqual(snap.getSync(key), value);
+            }
           }
         }
       }
@@ -188,42 +202,51 @@ describe('Urkel Transaction', function () {
     for (const [key, value] of entriesByRoot.flat()) {
       assert.strictEqual(await snap.has(key), true);
       assert.bufferEqual(await snap.get(key), value);
-      assert.strictEqual(snap.hasSync(key), true);
-      assert.bufferEqual(snap.getSync(key), value);
+      if (tree.supportsSync) {
+        assert.strictEqual(snap.hasSync(key), true);
+        assert.bufferEqual(snap.getSync(key), value);
+      }
     }
 
     for (let i = ROOTS - 1; i >= 0; i--) {
       // go to the past.
-      snap.injectSync(roots[i]);
+      await snap.inject(roots[i]);
 
       for (const [rootIndex, entries] of entriesByRoot.entries()) {
         if (rootIndex > i) {
           for (const [key] of entries) {
             assert.strictEqual(await snap.has(key), false);
             assert.strictEqual(await snap.get(key), null);
-            assert.strictEqual(snap.hasSync(key), false);
-            assert.strictEqual(snap.getSync(key), null);
+            if (tree.supportsSync) {
+              assert.strictEqual(snap.hasSync(key), false);
+              assert.strictEqual(snap.getSync(key), null);
+            }
           }
         } else {
           for (const [key, value] of entries) {
             assert.strictEqual(await snap.has(key), true);
             assert.bufferEqual(await snap.get(key), value);
-            assert.strictEqual(snap.hasSync(key), true);
-            assert.bufferEqual(snap.getSync(key), value);
+            if (tree.supportsSync) {
+              assert.strictEqual(snap.hasSync(key), true);
+              assert.bufferEqual(snap.getSync(key), value);
+            }
           }
         }
       }
     }
 
-    snap.injectSync(last);
+    await snap.inject(last);
 
     for (const [key, value] of entriesByRoot.flat()) {
       assert.strictEqual(await snap.has(key), true);
       assert.bufferEqual(await snap.get(key), value);
-      assert.strictEqual(snap.hasSync(key), true);
-      assert.bufferEqual(snap.getSync(key), value);
+      if (tree.supportsSync) {
+        assert.strictEqual(snap.hasSync(key), true);
+        assert.bufferEqual(snap.getSync(key), value);
+      }
     }
 
     await snap.close();
   });
 });
+}

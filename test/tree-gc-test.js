@@ -3,7 +3,7 @@
 const assert = require('bsert');
 const fs = require('fs');
 const {testdir, rmTreeDir, isTreeDir} = require('./util/common');
-const {Tree} = require('../lib/tree');
+const {Tree} = require('..');
 
 describe('Urkel Tree (GC)', function () {
   if (!global.gc)

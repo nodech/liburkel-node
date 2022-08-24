@@ -1,7 +1,7 @@
 /**
  * nurkel.c - native bindings to liburkel
  * Copyright (c) 2022, Nodari Chkuaselidze (MIT License)
- * https://github.com/nodech/liburkel
+ * https://github.com/nodech/nurkel
  */
 
 #include <stdbool.h>

@@ -8,7 +8,7 @@
   "bugs": {
     "url": "https://github.com/nodech/nurkel/issues"
   },
-  "main": "lib/tree",
+  "main": "lib/index",
   "scripts": {
     "install": "node-gyp rebuild",
     "lint": "eslint lib/ test/",
@@ -27,6 +27,7 @@
   "dependencies": {
     "bfile": "^0.2.2",
     "bsert": "^0.0.10",
-    "loady": "^0.0.5"
+    "loady": "^0.0.5",
+    "urkel": "^1.0.2"
   }
 }

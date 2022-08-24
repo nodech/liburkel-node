@@ -4,25 +4,30 @@ const path = require('path');
 const assert = require('bsert');
 const fs = require('fs');
 const {testdir, rmTreeDir, isTreeDir, randomKey} = require('./util/common');
-const {Tree, codes} = require('../lib/tree');
+const nurkel = require('..');
+const {proofCodes} = nurkel;
 
 const NULL_HASH = Buffer.alloc(32, 0);
 
-describe('Urkel Tree', function () {
+for (const memory of [false, true]) {
+describe(`Urkel Tree (${memory ? 'MemTree' : 'Tree'})`, function () {
+  const Tree = memory ? nurkel.MemTree : nurkel.Tree;
   let prefix, tree;
 
   beforeEach(async () => {
     prefix = testdir('tree');
-    fs.mkdirSync(prefix);
 
-    tree = new Tree({ prefix });
+    if (!memory)
+      fs.mkdirSync(prefix);
+
+    tree = nurkel.create({ memory, prefix });
     await tree.open();
   });
 
   afterEach(async () => {
     await tree.close();
 
-    if (isTreeDir(prefix))
+    if (!memory && isTreeDir(prefix))
       rmTreeDir(prefix);
   });
 
@@ -33,10 +38,11 @@ describe('Urkel Tree', function () {
   });
 
   it('should fail to open in non-existent dir', async () => {
+    if (memory)
+      this.skip();
+
     const nprefix = path.join(prefix, 'non', 'existent', 'dir');
-    const tree = new Tree({
-      prefix: nprefix
-    });
+    const tree = nurkel.create({ prefix: nprefix });
 
     let err;
 
@@ -52,10 +58,13 @@ describe('Urkel Tree', function () {
   });
 
   it('should remove all tree files (sync)', async () => {
+    if (memory)
+      this.skip();
+
     const prefix = testdir('files');
     fs.mkdirSync(prefix);
 
-    const tree = new Tree({ prefix });
+    const tree = nurkel.create({ prefix });
     await tree.open();
     await tree.close();
 
@@ -78,6 +87,9 @@ describe('Urkel Tree', function () {
   });
 
   it('should remove all tree files', async () => {
+    if (memory)
+      this.skip();
+
     const prefix = testdir('files');
     fs.mkdirSync(prefix);
 
@@ -125,16 +137,21 @@ describe('Urkel Tree', function () {
 
     for (let i = 0; i < 10; i++) {
       const origValue = values[i];
-      const valueS = tree.getSync(keys[i]);
       const value = await tree.get(keys[i]);
 
-      assert.bufferEqual(valueS, origValue);
+      if (tree.supportsSync) {
+        const valueS = tree.getSync(keys[i]);
+        assert.bufferEqual(valueS, origValue);
+      }
+
       assert.bufferEqual(value, origValue);
-      assert.strictEqual(tree.hasSync(keys[i]), true);
+      if (tree.supportsSync)
+        assert.strictEqual(tree.hasSync(keys[i]), true);
       assert.strictEqual(await tree.has(keys[i]), true);
     }
 
-    assert.strictEqual(tree.getSync(randomKey()), null);
+    if (tree.supportsSync)
+      assert.strictEqual(tree.getSync(randomKey()), null);
     assert.strictEqual(await tree.get(randomKey()), null);
   });
 
@@ -166,22 +183,25 @@ describe('Urkel Tree', function () {
       }
 
       await txn.commit();
-
       for (let j = 0; j < 5; j++) {
         const key = keys[i * 5 + j];
-        treeProofsSync[i * 5 + j] = tree.proveSync(key);;
+        if (tree.supportsSync)
+          treeProofsSync[i * 5 + j] = tree.proveSync(key);;
         treeProofs[i * 5 + j] = await tree.prove(key);
         roots.push(tree.rootHash());
       }
     }
 
-    let [code, value] = Tree.verifySync(roots[0], keys[1], proofs[0]);
-    assert.strictEqual(value, null);
-    assert.strictEqual(code, codes.URKEL_EHASHMISMATCH);
+    let code, value;
+    if (tree.supportsSync) {
+      [code, value] = Tree.verifySync(roots[0], keys[1], proofs[0]);
+      assert.strictEqual(value, null);
+      assert.strictEqual(code, proofCodes.URKEL_EHASHMISMATCH);
+    }
 
     [code, value] = await Tree.verify(roots[0], keys[1], proofs[0]);
     assert.strictEqual(value, null);
-    assert.strictEqual(code, codes.URKEL_EHASHMISMATCH);
+    assert.strictEqual(code, proofCodes.URKEL_EHASHMISMATCH);
 
     for (let i = 0; i < keys.length; i++) {
       const origValue = values[i];
@@ -190,24 +210,27 @@ describe('Urkel Tree', function () {
       const treeProofSync = treeProofsSync[i];
       const treeProof = treeProofs[i];
 
-      assert.bufferEqual(treeProofSync, proof);
+      if (tree.supportsSync)
+        assert.bufferEqual(treeProofSync, proof);
       assert.bufferEqual(treeProof, proof);
 
-      {
+      if (tree.supportsSync) {
         const [codeSync, valueSync] = Tree.verifySync(
           root,
           keys[i],
           proof
         );
 
-        const [code, value] = await Tree.verify(root, keys[i], proof);
-
-        assert.strictEqual(codeSync, codes.URKEL_OK);
+        assert.strictEqual(codeSync, proofCodes.URKEL_OK);
         assert.bufferEqual(valueSync, origValue);
+      }
 
-        assert.strictEqual(code, codes.URKEL_OK);
+      {
+        const [code, value] = await Tree.verify(root, keys[i], proof);
+        assert.strictEqual(code, proofCodes.URKEL_OK);
         assert.bufferEqual(value, origValue);
       }
+      break;
     }
   });
 
@@ -247,15 +270,19 @@ describe('Urkel Tree', function () {
           for (const [key] of entries) {
             assert.strictEqual(await tree.has(key), false);
             assert.strictEqual(await tree.get(key), null);
-            assert.strictEqual(tree.hasSync(key), false);
-            assert.strictEqual(tree.getSync(key), null);
+            if (tree.supportsSync) {
+              assert.strictEqual(tree.hasSync(key), false);
+              assert.strictEqual(tree.getSync(key), null);
+            }
           }
         } else {
           for (const [key, value] of entries) {
             assert.strictEqual(await tree.has(key), true);
             assert.bufferEqual(await tree.get(key), value);
-            assert.strictEqual(tree.hasSync(key), true);
-            assert.bufferEqual(tree.getSync(key), value);
+            if (tree.supportsSync) {
+              assert.strictEqual(tree.hasSync(key), true);
+              assert.bufferEqual(tree.getSync(key), value);
+            }
           }
         }
       }
@@ -266,40 +293,52 @@ describe('Urkel Tree', function () {
     for (const [key, value] of entriesByRoot.flat()) {
       assert.strictEqual(await tree.has(key), true);
       assert.bufferEqual(await tree.get(key), value);
-      assert.strictEqual(tree.hasSync(key), true);
-      assert.bufferEqual(tree.getSync(key), value);
+      if (tree.supportsSync) {
+        assert.strictEqual(tree.hasSync(key), true);
+        assert.bufferEqual(tree.getSync(key), value);
+      }
     }
 
     for (let i = ROOTS - 1; i >= 0; i--) {
       // go to the past.
-      tree.injectSync(roots[i]);
+      await tree.inject(roots[i]);
 
       for (const [rootIndex, entries] of entriesByRoot.entries()) {
         if (rootIndex > i) {
           for (const [key] of entries) {
             assert.strictEqual(await tree.has(key), false);
             assert.strictEqual(await tree.get(key), null);
-            assert.strictEqual(tree.hasSync(key), false);
-            assert.strictEqual(tree.getSync(key), null);
+            if (tree.supportsSync) {
+              assert.strictEqual(tree.hasSync(key), false);
+              assert.strictEqual(tree.getSync(key), null);
+            }
           }
         } else {
           for (const [key, value] of entries) {
             assert.strictEqual(await tree.has(key), true);
             assert.bufferEqual(await tree.get(key), value);
-            assert.strictEqual(tree.hasSync(key), true);
-            assert.bufferEqual(tree.getSync(key), value);
+            if (tree.supportsSync) {
+              assert.strictEqual(tree.hasSync(key), true);
+              assert.bufferEqual(tree.getSync(key), value);
+            }
           }
         }
       }
     }
 
-    tree.injectSync(last);
+    if (tree.supportsSync)
+      tree.injectSync(last);
+    else
+      await tree.inject(last);
 
     for (const [key, value] of entriesByRoot.flat()) {
       assert.strictEqual(await tree.has(key), true);
       assert.bufferEqual(await tree.get(key), value);
-      assert.strictEqual(tree.hasSync(key), true);
-      assert.bufferEqual(tree.getSync(key), value);
+      if (tree.supportsSync) {
+        assert.strictEqual(tree.hasSync(key), true);
+        assert.bufferEqual(tree.getSync(key), value);
+      }
     }
   });
 });
+}

@@ -9,17 +9,18 @@ const assert = require('bsert');
 const fs = require('fs');
 const crypto = require('crypto');
 const {testdir, rmTreeDir, isTreeDir, randomKey} = require('./util/common');
-const {Tree, codes} = require('../lib/tree');
+const nurkel = require('..');
+const {proofCodes, BLAKE2b} = nurkel;
 
 const HASH_SIZE = 32;
 
-const FOO1 = Tree.hashSync(Buffer.from('foo1'));
-const FOO2 = Tree.hashSync(Buffer.from('foo2'));
-const FOO3 = Tree.hashSync(Buffer.from('foo3'));
-const FOO4 = Tree.hashSync(Buffer.from('foo4'));
-const FOO5 = Tree.hashSync(Buffer.from('foo5'));
-const FOO6 = Tree.hashSync(Buffer.from('foo6'));
-const FOO7 = Tree.hashSync(Buffer.from('foo7'));
+const FOO1 = BLAKE2b.digest(Buffer.from('foo1'));
+const FOO2 = BLAKE2b.digest(Buffer.from('foo2'));
+const FOO3 = BLAKE2b.digest(Buffer.from('foo3'));
+const FOO4 = BLAKE2b.digest(Buffer.from('foo4'));
+const FOO5 = BLAKE2b.digest(Buffer.from('foo5'));
+const FOO6 = BLAKE2b.digest(Buffer.from('foo6'));
+const FOO7 = BLAKE2b.digest(Buffer.from('foo7'));
 
 const BAR1 = Buffer.from('bar1');
 const BAR2 = Buffer.from('bar2');
@@ -30,28 +31,25 @@ function random(min, max) {
   return Math.floor(Math.random() * (max - min)) + min;
 }
 
-describe('Urkel radix', function() {
+for (const memory of [false, true]) {
+describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
   this.timeout(5000);
+  const Tree = memory ? nurkel.MemTree : nurkel.Tree;
   let prefix, tree;
 
   beforeEach(async () => {
     prefix = testdir('tree');
-    fs.mkdirSync(prefix);
-
-    tree = new Tree({ prefix });
-    await tree.open();
+    if (!memory)
+      fs.mkdirSync(prefix);
   });
 
   afterEach(async () => {
-    await tree.close();
-
-    if (isTreeDir(prefix))
+    if (!memory && isTreeDir(prefix))
       rmTreeDir(prefix);
   });
 
   it('should test tree', async () => {
-    const tree = new Tree({prefix});
-
+    const tree = nurkel.create({ prefix, memory });
     await tree.open();
 
     let batch = tree.batch();
@@ -108,11 +106,11 @@ describe('Urkel radix', function() {
       await ss.open();
       const proof = await ss.prove(FOO2);
       const [code, data] = await Tree.verify(first, FOO2, proof);
-      assert.strictEqual(code, codes.URKEL_OK);
+      assert.strictEqual(code, proofCodes.URKEL_OK);
       assert.bufferEqual(data, BAR2);
 
       const [codeSync, dataSync] = Tree.verifySync(first, FOO2, proof);
-      assert.strictEqual(codeSync, codes.URKEL_OK);
+      assert.strictEqual(codeSync, proofCodes.URKEL_OK);
       assert.bufferEqual(dataSync, BAR2);
     }
 
@@ -122,11 +120,11 @@ describe('Urkel radix', function() {
       await ss.open();
       const proof = await ss.prove(FOO5);
       const [code, data] = await Tree.verify(first, FOO5, proof);
-      assert.strictEqual(code, codes.URKEL_OK);
+      assert.strictEqual(code, proofCodes.URKEL_OK);
       assert.strictEqual(data, null);
 
       const [codeSync, dataSync] = Tree.verifySync(first, FOO5, proof);
-      assert.strictEqual(codeSync, codes.URKEL_OK);
+      assert.strictEqual(codeSync, proofCodes.URKEL_OK);
       assert.strictEqual(dataSync, null);
     }
 
@@ -136,11 +134,11 @@ describe('Urkel radix', function() {
       await ss.open();
       const proof = await ss.prove(FOO4);
       const [code, data] = await Tree.verify(first, FOO4, proof);
-      assert.strictEqual(code, codes.URKEL_OK);
+      assert.strictEqual(code, proofCodes.URKEL_OK);
       assert.strictEqual(data, null);
 
       const [codeSync, dataSync] = Tree.verifySync(first, FOO4, proof);
-      assert.strictEqual(codeSync, codes.URKEL_OK);
+      assert.strictEqual(codeSync, proofCodes.URKEL_OK);
       assert.strictEqual(dataSync, null);
     }
 
@@ -237,7 +235,7 @@ describe('Urkel radix', function() {
 
   it('should test max value size', async () => {
     const MAX_VALUE = 0x3ff;
-    const tree = new Tree({prefix});
+    const tree = nurkel.create({ prefix, memory });
 
     await tree.open();
 
@@ -281,7 +279,7 @@ describe('Urkel radix', function() {
   });
 
   it('should pummel tree', async () => {
-    const tree = new Tree({ prefix });
+    const tree = nurkel.create({ prefix, memory });
 
     const items = [];
     const set = new Set();
@@ -477,7 +475,7 @@ describe('Urkel radix', function() {
   });
 
   it('should test history independence', async () => {
-    const opts = {prefix};
+    const opts = { prefix, memory };
 
     const items = [];
     const removed = [];
@@ -489,10 +487,10 @@ describe('Urkel radix', function() {
       items.push([key, value]);
     }
 
-    const tree1 = new Tree(opts);
+    const tree1 = nurkel.create(opts);
     await tree1.open();
 
-    const tree2 = new Tree(opts);
+    const tree2 = nurkel.create(opts);
     await tree2.open();
 
     let root = null;
@@ -568,3 +566,4 @@ describe('Urkel radix', function() {
     await tree2.close();
   });
 });
+}
