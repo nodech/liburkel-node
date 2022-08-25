@@ -2440,6 +2440,7 @@ NURKEL_COMPLETE(tx_open) {
   if (status != napi_ok || worker->success == false) {
     ntx->is_opening = false;
 
+    nurkel_unregister_tx(ntx);
     NAPI_OK(nurkel_create_error(env,
                                 worker->err_res,
                                 "Failed to tx open.",
@@ -3306,6 +3307,7 @@ NURKEL_COMPLETE(tx_prove) {
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
+
   if (worker->out_proof != NULL)
     free(worker->out_proof);
   free(worker);

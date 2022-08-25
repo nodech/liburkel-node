@@ -36,4 +36,18 @@ describe('Urkel Transaction (segfault)', function () {
     await snap.close();
     await tree.close();
   });
+
+  it('Segfault snapshot close error when snapshot failed open', async () => {
+    // Missing root will fail open.
+    const snap = tree.snapshot(Buffer.alloc(32, 0x01));;
+    try {
+      await snap.open();
+    } catch (e) {
+      ;
+    }
+
+    // This will segfault, because snap was not unregistered after it failed
+    // to open.
+    await tree.close();
+  });
 });
