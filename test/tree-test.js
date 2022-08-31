@@ -5,7 +5,7 @@ const assert = require('bsert');
 const fs = require('fs');
 const {testdir, rmTreeDir, isTreeDir, randomKey} = require('./util/common');
 const nurkel = require('..');
-const {proofCodes} = nurkel;
+const {statusCodes} = nurkel;
 
 const NULL_HASH = Buffer.alloc(32, 0);
 
@@ -196,12 +196,12 @@ describe(`Urkel Tree (${memory ? 'MemTree' : 'Tree'})`, function () {
     if (tree.supportsSync) {
       [code, value] = Tree.verifySync(roots[0], keys[1], proofs[0]);
       assert.strictEqual(value, null);
-      assert.strictEqual(code, proofCodes.URKEL_EHASHMISMATCH);
+      assert.strictEqual(code, statusCodes.URKEL_EHASHMISMATCH);
     }
 
     [code, value] = await Tree.verify(roots[0], keys[1], proofs[0]);
     assert.strictEqual(value, null);
-    assert.strictEqual(code, proofCodes.URKEL_EHASHMISMATCH);
+    assert.strictEqual(code, statusCodes.URKEL_EHASHMISMATCH);
 
     for (let i = 0; i < keys.length; i++) {
       const origValue = values[i];
@@ -221,13 +221,13 @@ describe(`Urkel Tree (${memory ? 'MemTree' : 'Tree'})`, function () {
           proof
         );
 
-        assert.strictEqual(codeSync, proofCodes.URKEL_OK);
+        assert.strictEqual(codeSync, statusCodes.URKEL_OK);
         assert.bufferEqual(valueSync, origValue);
       }
 
       {
         const [code, value] = await Tree.verify(root, keys[i], proof);
-        assert.strictEqual(code, proofCodes.URKEL_OK);
+        assert.strictEqual(code, statusCodes.URKEL_OK);
         assert.bufferEqual(value, origValue);
       }
       break;

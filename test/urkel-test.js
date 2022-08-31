@@ -10,7 +10,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const {testdir, rmTreeDir, isTreeDir, randomKey} = require('./util/common');
 const nurkel = require('..');
-const {proofCodes, BLAKE2b} = nurkel;
+const {statusCodes, BLAKE2b} = nurkel;
 
 const HASH_SIZE = 32;
 
@@ -106,11 +106,11 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
       await ss.open();
       const proof = await ss.prove(FOO2);
       const [code, data] = await Tree.verify(first, FOO2, proof);
-      assert.strictEqual(code, proofCodes.URKEL_OK);
+      assert.strictEqual(code, statusCodes.URKEL_OK);
       assert.bufferEqual(data, BAR2);
 
       const [codeSync, dataSync] = Tree.verifySync(first, FOO2, proof);
-      assert.strictEqual(codeSync, proofCodes.URKEL_OK);
+      assert.strictEqual(codeSync, statusCodes.URKEL_OK);
       assert.bufferEqual(dataSync, BAR2);
     }
 
@@ -120,11 +120,11 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
       await ss.open();
       const proof = await ss.prove(FOO5);
       const [code, data] = await Tree.verify(first, FOO5, proof);
-      assert.strictEqual(code, proofCodes.URKEL_OK);
+      assert.strictEqual(code, statusCodes.URKEL_OK);
       assert.strictEqual(data, null);
 
       const [codeSync, dataSync] = Tree.verifySync(first, FOO5, proof);
-      assert.strictEqual(codeSync, proofCodes.URKEL_OK);
+      assert.strictEqual(codeSync, statusCodes.URKEL_OK);
       assert.strictEqual(dataSync, null);
     }
 
@@ -134,11 +134,11 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
       await ss.open();
       const proof = await ss.prove(FOO4);
       const [code, data] = await Tree.verify(first, FOO4, proof);
-      assert.strictEqual(code, proofCodes.URKEL_OK);
+      assert.strictEqual(code, statusCodes.URKEL_OK);
       assert.strictEqual(data, null);
 
       const [codeSync, dataSync] = Tree.verifySync(first, FOO4, proof);
-      assert.strictEqual(codeSync, proofCodes.URKEL_OK);
+      assert.strictEqual(codeSync, statusCodes.URKEL_OK);
       assert.strictEqual(dataSync, null);
     }
 

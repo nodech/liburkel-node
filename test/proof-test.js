@@ -4,7 +4,7 @@ const assert = require('bsert');
 const fs = require('fs');
 const {testdir, rmTreeDir, isTreeDir} = require('./util/common');
 const nurkel = require('..');
-const {BLAKE2b, proofTypes, proofCodes} = nurkel;
+const {BLAKE2b, proofTypes, statusCodes} = nurkel;
 
 const foo = n => BLAKE2b.digest(Buffer.from('foo' + n));
 const bar = n => Buffer.from('bar' + n);
@@ -93,16 +93,16 @@ describe(`Urkel Proof (${memory ? 'MemTree' : 'Tree'})`, function () {
 
       for (const [name, fn] of Object.entries(checkMatrix)) {
         let [rcode, rvalue] = await fn(root, key, proof);
-        assert.strictEqual(rcode, proofCodes.URKEL_OK, `Error in ${name}.`);
+        assert.strictEqual(rcode, statusCodes.URKEL_OK, `Error in ${name}.`);
         assert.bufferEqual(rvalue, value, `Error check value in ${name}.`);
 
         [rcode, rvalue] = await fn(root, modifiedKey, proof);
-        assert.strictEqual(rcode, proofCodes.URKEL_EHASHMISMATCH,
+        assert.strictEqual(rcode, statusCodes.URKEL_EHASHMISMATCH,
                            `Error in ${name}.`);
         assert.strictEqual(rvalue, null, `Error check value in ${name}.`);
 
         [rcode, rvalue] = await fn(root, foo(5), proof);
-        assert.strictEqual(rcode, proofCodes.URKEL_EPATHMISMATCH,
+        assert.strictEqual(rcode, statusCodes.URKEL_EPATHMISMATCH,
                            `Error in ${name}.`);
         assert.strictEqual(rvalue, null, `Error check value in ${name}.`);
       }
@@ -119,13 +119,13 @@ describe(`Urkel Proof (${memory ? 'MemTree' : 'Tree'})`, function () {
     );
     const checkOK = async ({name, fn, root, key, value, proof}) => {
       let [rcode, rvalue] = await fn(root, key, proof);
-      assert.strictEqual(rcode, proofCodes.URKEL_OK, `Error in ${name}.`);
+      assert.strictEqual(rcode, statusCodes.URKEL_OK, `Error in ${name}.`);
       assert.bufferEqual(rvalue, value, `Error check value in ${name}.`);
 
       const modifiedKey = Buffer.concat([key]);
       modifiedKey[31] = 0x00;
       [rcode, rvalue] = await fn(root, modifiedKey, proof);
-      assert.strictEqual(rcode, proofCodes.URKEL_EHASHMISMATCH,
+      assert.strictEqual(rcode, statusCodes.URKEL_EHASHMISMATCH,
                          `Error in ${name}.`);
       assert.strictEqual(rvalue, null, `Error check value in ${name}.`);
     };
@@ -175,7 +175,7 @@ describe(`Urkel Proof (${memory ? 'MemTree' : 'Tree'})`, function () {
 
     for (const [name, fn] of Object.entries(withSnap(snap))) {
       const [rcode, rvalue] = await fn(root, foo(3), proof);
-      assert.strictEqual(rcode, proofCodes.URKEL_OK, `Error in ${name}.`);
+      assert.strictEqual(rcode, statusCodes.URKEL_OK, `Error in ${name}.`);
       assert.strictEqual(rvalue, null, `Error check value in ${name}.`);
     }
   });
@@ -197,7 +197,7 @@ describe(`Urkel Proof (${memory ? 'MemTree' : 'Tree'})`, function () {
 
       for (const [name, fn] of Object.entries(withSnap(snap))) {
         const [rcode, rvalue] = await fn(root, foo(6), proof);
-        assert.strictEqual(rcode, proofCodes.URKEL_OK, `Error in ${name}.`);
+        assert.strictEqual(rcode, statusCodes.URKEL_OK, `Error in ${name}.`);
         assert.strictEqual(rvalue, null, `Error check value in ${name}.`);
       }
     }
@@ -226,11 +226,11 @@ describe(`Urkel Proof (${memory ? 'MemTree' : 'Tree'})`, function () {
 
       for (const [name, fn] of Object.entries(withSnap(snap))) {
         let [rcode, rvalue] = await fn(root, modifiedFOO1, proof);
-        assert.strictEqual(rcode, proofCodes.URKEL_OK, `Error in ${name}.`);
+        assert.strictEqual(rcode, statusCodes.URKEL_OK, `Error in ${name}.`);
         assert.strictEqual(rvalue, null, `Error check value in ${name}.`);
 
         [rcode, rvalue] = await fn(root, foo(1), proof);
-        assert.strictEqual(rcode, proofCodes.URKEL_ESAMEKEY,
+        assert.strictEqual(rcode, statusCodes.URKEL_ESAMEKEY,
                            `Error in ${name}.`);
         assert.strictEqual(rvalue, null,  `Error check value in ${name}.`);
       }
