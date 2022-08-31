@@ -1,6 +1,6 @@
 {
   "name": "nurkel",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Liburkel bindings for node.js",
   "license": "MIT",
   "repository": "git://github.com/nodech/nurkel.git",
