@@ -586,7 +586,7 @@ nurkel_get_buffer_copy(napi_env env, napi_value value, uint8_t *out,
     return status;
 
   if (!is_buffer)
-    return napi_invalid_arg;;
+    return napi_invalid_arg;
 
   status = napi_get_buffer_info(env, value, (void **)&buffer, &buffer_len);
 
@@ -1929,35 +1929,25 @@ NURKEL_METHOD(verify_sync) {
   napi_status status;
   uint8_t root[URKEL_HASH_SIZE];
   uint8_t key[URKEL_HASH_SIZE];
-  uint8_t *proof;
   uint8_t value[URKEL_VALUE_SIZE];
   size_t value_len = 0;
+  uint8_t *proof;
   size_t proof_len;
+  bool is_buffer;
 
   NURKEL_ARGV(3);
   NURKEL_JS_HASH_OK(argv[0], root);
   NURKEL_JS_HASH_OK(argv[1], key);
 
-  JS_NAPI_OK(napi_get_buffer_info(env, argv[2], NULL, &proof_len), JS_ERR_ARG);
-  proof = malloc(proof_len);
-  JS_ASSERT(proof != NULL, JS_ERR_ALLOC);
+  JS_NAPI_OK(napi_is_buffer(env, argv[2], &is_buffer), JS_ERR_ARG);
+  JS_ASSERT(is_buffer, JS_ERR_ARG);
+  JS_NAPI_OK(napi_get_buffer_info(env, argv[2], (void **)&proof, &proof_len), JS_ERR_ARG);
   JS_ASSERT(proof_len <= URKEL_PROOF_SIZE, JS_ERR_ARG);
-
-  JS_NAPI_OK(nurkel_get_buffer_copy(env,
-                                    argv[2],
-                                    proof,
-                                    &proof_len,
-                                    proof_len,
-                                    false), JS_ERR_ARG);
 
   int exists = 0;
 
-  if (!urkel_verify(&exists, value, &value_len, proof, proof_len, key, root)) {
-    free(proof);
+  if (!urkel_verify(&exists, value, &value_len, proof, proof_len, key, root))
     JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to verify_sync.");
-  }
-
-  free(proof);
 
   JS_NAPI_OK(napi_create_array_with_length(env, 2, &result), JS_ERR_NODE);
   JS_NAPI_OK(napi_get_boolean(env, exists, &result_exists), JS_ERR_NODE);
@@ -2029,9 +2019,12 @@ NURKEL_METHOD(verify) {
   nurkel_verify_worker_t *worker;
   size_t proof_len;
   char *err;
+  bool is_buffer;
 
   NURKEL_ARGV(3);
 
+  JS_NAPI_OK(napi_is_buffer(env, argv[2], &is_buffer), JS_ERR_ARG);
+  JS_ASSERT(is_buffer, JS_ERR_ARG);
   JS_NAPI_OK(napi_get_buffer_info(env, argv[2], NULL, &proof_len), JS_ERR_ARG);
 
   worker = malloc(sizeof(nurkel_verify_worker_t));
@@ -2798,6 +2791,7 @@ NURKEL_METHOD(tx_get_sync) {
   NURKEL_TX_READY();
 
   JS_NAPI_OK(napi_is_buffer(env, argv[1], &is_buffer), JS_ERR_ARG);
+  JS_ASSERT(is_buffer, JS_ERR_ARG);
   JS_NAPI_OK(napi_get_buffer_info(env,
                                   argv[1],
                                   (void **)&key_hash,

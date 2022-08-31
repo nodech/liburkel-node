@@ -4,6 +4,7 @@ const assert = require('bsert');
 const fs = require('fs');
 const {testdir, rmTreeDir, randomKey} = require('./util/common');
 const nurkel = require('..');
+const {Proof} = nurkel;
 
 const NULL_HASH = Buffer.alloc(32, 0);
 
@@ -101,11 +102,12 @@ describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
       const key = Buffer.from(keyHex, 'hex');
       const proof = await txn1.prove(key);
 
-      assert(Buffer.isBuffer(proof));
+      assert(Proof.isProof(proof));
+      assert(Buffer.isBuffer(proof.raw));
 
       if (tree.supportsSync) {
         const proofS = txn1.proveSync(key);
-        assert.bufferEqual(proof, proofS);
+        assert.bufferEqual(proof.raw, proofS.raw);
       }
     }
 

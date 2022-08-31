@@ -211,8 +211,8 @@ describe(`Urkel Tree (${memory ? 'MemTree' : 'Tree'})`, function () {
       const treeProof = treeProofs[i];
 
       if (tree.supportsSync)
-        assert.bufferEqual(treeProofSync, proof);
-      assert.bufferEqual(treeProof, proof);
+        assert.bufferEqual(treeProofSync.raw, proof.raw);
+      assert.bufferEqual(treeProof.raw, proof.raw);
 
       if (tree.supportsSync) {
         const [codeSync, valueSync] = Tree.verifySync(
