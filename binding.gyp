@@ -72,17 +72,6 @@
             4996, # deprications
           ],
         }],
-        # ["OS == 'win'", {
-        #   "defines": ["_WIN32_WINNT=0x0501"],
-        #   "sources": [
-        #     "./deps/liburkel/src/io_win.c"
-        #   ]
-        # }],
-        # ["OS != 'win'", {
-        #   "sources": [
-        #     "./deps/liburkel/src/io_posix.c"
-        #   ]
-        # }],
         ["OS == 'linux'", {
           "defines": ["_POSIX_C_SOURCE=200112"]
         }],
@@ -97,7 +86,11 @@
         "liburkel",
       ],
       "sources": [
-        "./src/nurkel.c"
+        "./src/nurkel.c",
+        "./src/tree.c",
+        "./src/transaction.c",
+        "./src/util.c",
+        "./src/common.c"
       ],
       "conditions": [
         ["OS != 'mac' and OS != 'win'", {
