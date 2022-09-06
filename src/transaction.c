@@ -108,10 +108,6 @@ nurkel_tx_close_work(nurkel_tx_close_params_t params) {
 
   CHECK(ntx != NULL);
 
-  /* TODO: Dive into segfault here.
-   * Possible scenario?
-   *   ntx is freed before even get here from the nurkel_close_work_txs?.
-   */
   if (ntx->is_closing || ntx->should_close) {
     if (params.promise) {
       return napi_throw_error(params.env,
@@ -601,8 +597,6 @@ NURKEL_METHOD(tx_get) {
   WORKER_INIT(worker);
   worker->ctx = ntx;
 
-  /* TODO: Does nodejs buffer live long enough for us to use underlying buffer
-   * instead of copy? */
   NURKEL_JS_HASH(argv[1], worker->in_key);
 
   if (status != napi_ok) {
@@ -974,14 +968,12 @@ NURKEL_METHOD(tx_prove_sync) {
   if (!urkel_tx_prove(ntx->tx, &out_proof_raw, &out_proof_len, in_key))
     JS_THROW(urkel_errors[urkel_errno - 1]);
 
-  /* TODO: Move instead of copy */
-  status = napi_create_buffer_copy(env,
-                                   out_proof_len,
-                                   out_proof_raw,
-                                   NULL,
-                                   &result);
-
-  free(out_proof_raw);
+  status = napi_create_external_buffer(env,
+                                       out_proof_len,
+                                       out_proof_raw,
+                                       nurkel_buffer_finalize,
+                                       NULL,
+                                       &result);
 
   if (status != napi_ok)
     JS_THROW(JS_ERR_NODE);
@@ -1020,20 +1012,18 @@ NURKEL_COMPLETE(tx_prove) {
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
   } else {
     CHECK(worker->out_proof != NULL);
-    /* TODO: Move instead of copy */
-    NAPI_OK(napi_create_buffer_copy(env,
-                                    worker->out_proof_len,
-                                    worker->out_proof,
-                                    NULL,
-                                    &result));
+    NAPI_OK(napi_create_external_buffer(env,
+                                        worker->out_proof_len,
+                                        worker->out_proof,
+                                        nurkel_buffer_finalize,
+                                        NULL,
+                                        &result));
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_tx_close_try_close(env, ntx));
 
-  if (worker->out_proof != NULL)
-    free(worker->out_proof);
   free(worker);
 }
 
@@ -1050,6 +1040,8 @@ NURKEL_METHOD(tx_prove) {
   JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
   WORKER_INIT(worker);
   worker->ctx = ntx;
+  worker->out_proof = NULL;
+  worker->out_proof_len = 0;
 
   NURKEL_JS_HASH(argv[1], worker->in_key);
 

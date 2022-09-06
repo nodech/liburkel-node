@@ -53,7 +53,7 @@ extern const char *inst_errors[];
 #define JS_ERR_URKEL_DESTROY "Urkel destroy failed."
 
 /*
- * Forward declarations.
+ * Main state management structs.
  */
 
 typedef struct nurkel_tx_entry_s {
@@ -95,7 +95,7 @@ typedef struct nurkel_tx_s {
 } nurkel_tx_t;
 
 /*
- * Tree close worker.
+ * Close worker related.
  */
 
 #define WORKER_CLOSE_PARAMS(ctx_t) \
@@ -105,6 +105,9 @@ typedef struct nurkel_tx_s {
   bool promise;                    \
   bool destroy;                    \
 
+/*
+ * Tree close worker.
+ */
 
 typedef struct nurkel_close_params_s {
   WORKER_CLOSE_PARAMS(nurkel_tree_t)

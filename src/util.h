@@ -10,7 +10,7 @@
 #include <node_api.h>
 
 /*
- * General NAPI Macros
+ * General NAPI helper Macros
  */
 
 #define CHECK(expr) do {                           \
@@ -43,7 +43,7 @@
 #define JS_ASSERT(cond, msg) if (!(cond)) JS_THROW(msg)
 
 /*
- * NAPI related macros.
+ * Nurkel related macros.
  */
 
 #define NURKEL_METHOD(name)                             \
@@ -99,7 +99,7 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
 } while(0)
 
 /*
- * Workers
+ * Workers helper macros
  */
 
 #define WORKER_BASE_PROPS(ctx_t) \
@@ -118,6 +118,10 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
   worker->work = NULL;           \
   worker->ref = NULL;            \
 } while(0)
+
+/*
+ * General utilities.
+ */
 
 void
 nurkel_assert_fail(const char *file, int line, const char *expr);
@@ -143,5 +147,8 @@ napi_status
 nurkel_get_buffer_copy(napi_env env, napi_value value, uint8_t *out,
                        size_t *out_len, const size_t expected,
                        bool expect_lte);
+
+void
+nurkel_buffer_finalize(napi_env env, void *data, void *hint);
 
 #endif /* _NURKEL_UTIL_H */

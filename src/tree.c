@@ -4,10 +4,12 @@
  * https://github.com/nodech/nurkel
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <node_api.h>
 #include "common.h"
+#include "util.h"
 #include "tree.h"
 
 void
@@ -1124,12 +1126,12 @@ NURKEL_METHOD(prove_sync) {
   if (!urkel_prove(ntree->tree, &out_proof_raw, &out_proof_len, in_key, NULL))
     JS_THROW(urkel_errors[urkel_errno - 1]);
 
-  status = napi_create_buffer_copy(env,
-                                   out_proof_len,
-                                   out_proof_raw,
-                                   NULL,
-                                   &result);
-  free(out_proof_raw);
+  status = napi_create_external_buffer(env,
+                                       out_proof_len,
+                                       out_proof_raw,
+                                       nurkel_buffer_finalize,
+                                       NULL,
+                                       &result);
 
   if (status != napi_ok)
     JS_THROW(JS_ERR_NODE);
@@ -1168,18 +1170,17 @@ NURKEL_COMPLETE(prove) {
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
   } else {
     CHECK(worker->out_proof != NULL);
-    NAPI_OK(napi_create_buffer_copy(env,
-                                    worker->out_proof_len,
-                                    worker->out_proof,
-                                    NULL,
-                                    &result));
+    NAPI_OK(napi_create_external_buffer(env,
+                                        worker->out_proof_len,
+                                        worker->out_proof,
+                                        nurkel_buffer_finalize,
+                                        NULL,
+                                        &result));
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_close_try_close(env, ntree));
-  if (worker->out_proof != NULL)
-    free(worker->out_proof);
   free(worker);
 }
 
@@ -1196,6 +1197,8 @@ NURKEL_METHOD(prove) {
   JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
   WORKER_INIT(worker);
   worker->ctx = ntree;
+  worker->out_proof = NULL;
+  worker->out_proof_len = 0;
 
   NURKEL_JS_HASH(argv[1], worker->in_key);
 

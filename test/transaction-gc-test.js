@@ -152,6 +152,10 @@ describe('Urkel Transaction (GC)', function () {
     await tree.close();
   });
 
+  /*
+   * NOTE: External buffers are not freed on GC run right away
+   * they still take time.
+   */
   it('should test memory leak for proof', async () => {
     await tree.open();
 
@@ -187,13 +191,18 @@ describe('Urkel Transaction (GC)', function () {
       }
 
       usage = process.memoryUsage();
-      assert(lastUsage.arrayBuffers < usage.arrayBuffers);
+      // Proofs are now external not array buffer.
+      assert(lastUsage.external < usage.external);
       lastUsage = usage;
     })();
 
+    // External buffers don't get freed on first run ?
     global.gc();
+    global.gc();
+
     usage = process.memoryUsage();
     assert(lastUsage.arrayBuffers > usage.arrayBuffers);
+    assert(lastUsage.external > usage.external);
 
     await tree.close();
   });

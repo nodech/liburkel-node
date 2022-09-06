@@ -165,3 +165,13 @@ nurkel_get_buffer_copy(napi_env env, napi_value value, uint8_t *out,
 
   return napi_ok;
 }
+
+void
+nurkel_buffer_finalize(napi_env env, void *data, void *hint) {
+  (void)hint;
+
+  if (!data)
+    return;
+
+  free(data);
+}

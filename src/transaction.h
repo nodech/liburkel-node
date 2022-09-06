@@ -15,6 +15,10 @@
 #include "util.h"
 #include "tree.h"
 
+/*
+ * Helper macros for TXs.s
+ */
+
 #define NURKEL_TX_CONTEXT()                                                  \
   nurkel_tx_t *ntx = NULL;                                                   \
   nurkel_tree_t *ntree = NULL;                                               \
@@ -100,7 +104,7 @@ typedef struct nurkel_tx_inject_worker_s {
 } nurkel_tx_inject_worker_t;
 
 /*
- * Binding declarations
+ * Transaction life cycle methods.
  */
 
 void
@@ -117,6 +121,7 @@ nurkel_tx_destroy(napi_env env, void *data, void *hint);
 
 napi_status
 nurkel_tx_close_work(nurkel_tx_close_params_t params);
+
 /*
  * Transaction bindings.
  */

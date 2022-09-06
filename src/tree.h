@@ -14,6 +14,9 @@
 #include "common.h"
 #include "util.h"
 
+/*
+ * Tree helper macros.
+ */
 
 #define NURKEL_TREE_CONTEXT()                                                  \
   nurkel_tree_t *ntree = NULL;                                                 \
@@ -120,10 +123,8 @@ typedef struct nurkel_stat_worker_s {
 } nurkel_stat_worker_t;
 
 /*
- * Binding declarations
+ * Tree life cycle management.
  */
-
-/* Forwards */
 
 void
 nurkel_ntree_init(nurkel_tree_t *ntree);
@@ -147,7 +148,7 @@ void
 nurkel_ntree_destroy(napi_env env, void *data, void *hint);
 
 /*
- * Binding declarations.
+ * Tree binding declarations.
  */
 
 NURKEL_METHOD(init);
