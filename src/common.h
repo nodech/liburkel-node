@@ -16,6 +16,7 @@
  * Urkel errors
  */
 
+#define URKEL_UNKNOWN -1
 #define URKEL_OK 0
 
 /* Errnos start with 1, 0 = everything's ok. */

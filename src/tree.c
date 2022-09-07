@@ -1249,16 +1249,18 @@ NURKEL_METHOD(prove) {
 
 NURKEL_METHOD(verify_sync) {
   napi_value result_value;
-  napi_value result_exists;
+  napi_value result_code;
   napi_value result;
   napi_status status;
   uint8_t root[URKEL_HASH_SIZE];
   uint8_t key[URKEL_HASH_SIZE];
   uint8_t value[URKEL_VALUE_SIZE];
   size_t value_len = 0;
+  int exists = 0;
   uint8_t *proof;
   size_t proof_len;
   bool is_buffer;
+  int res;
 
   NURKEL_ARGV(3);
   NURKEL_JS_HASH_OK(argv[0], root);
@@ -1269,20 +1271,31 @@ NURKEL_METHOD(verify_sync) {
   JS_NAPI_OK(napi_get_buffer_info(env, argv[2], (void **)&proof, &proof_len), JS_ERR_ARG);
   JS_ASSERT(proof_len <= URKEL_PROOF_SIZE, JS_ERR_ARG);
 
-  int exists = 0;
-
-  if (!urkel_verify(&exists, value, &value_len, proof, proof_len, key, root))
-    JS_THROW_CODE(urkel_errno, "Failed to verify_sync.");
-
   JS_NAPI_OK(napi_create_array_with_length(env, 2, &result), JS_ERR_NODE);
-  JS_NAPI_OK(napi_get_boolean(env, exists, &result_exists), JS_ERR_NODE);
-  JS_NAPI_OK(napi_create_buffer_copy(env,
-                                     value_len,
-                                     value,
-                                     NULL,
-                                     &result_value), JS_ERR_NODE);
 
-  JS_NAPI_OK(napi_set_element(env, result, 0, result_exists), JS_ERR_NODE);
+  res = urkel_verify(&exists, value, &value_len, proof, proof_len, key, root);
+
+  if (!res) {
+    JS_NAPI_OK(napi_create_int32(env, urkel_errno, &result_code), JS_ERR_NODE);
+    JS_NAPI_OK(napi_get_null(env, &result_value), JS_ERR_NODE);
+
+    JS_NAPI_OK(napi_set_element(env, result, 0, result_code), JS_ERR_NODE);
+    JS_NAPI_OK(napi_set_element(env, result, 1, result_value), JS_ERR_NODE);
+    return result;
+  }
+
+  if (exists) {
+    JS_NAPI_OK(napi_create_buffer_copy(env,
+                                       value_len,
+                                       value,
+                                       NULL,
+                                       &result_value), JS_ERR_NODE);
+  } else {
+    JS_NAPI_OK(napi_get_null(env, &result_value), JS_ERR_NODE);
+  }
+
+  JS_NAPI_OK(napi_create_int32(env, URKEL_OK, &result_code), JS_ERR_NODE);
+  JS_NAPI_OK(napi_set_element(env, result, 0, result_code), JS_ERR_NODE);
   JS_NAPI_OK(napi_set_element(env, result, 1, result_value), JS_ERR_NODE);
 
   return result;
@@ -1310,26 +1323,38 @@ NURKEL_EXEC(verify) {
 
 NURKEL_COMPLETE(verify) {
   napi_value result;
-  napi_value result_exists;
+  napi_value result_code;
   napi_value result_value;
   nurkel_verify_worker_t *worker = data;
 
-  if (status != napi_ok || worker->success == false) {
+  if (status != napi_ok) {
     NAPI_OK(nurkel_create_error(env,
-                                worker->err_res,
+                                URKEL_UNKNOWN,
                                 "Failed to verify.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+  } else if (worker->success == false) {
+    NAPI_OK(napi_create_array_with_length(env, 2, &result));
+    NAPI_OK(napi_create_int32(env, worker->err_res, &result_code));
+    NAPI_OK(napi_get_null(env, &result_value));
+    NAPI_OK(napi_set_element(env, result, 0, result_code));
+    NAPI_OK(napi_set_element(env, result, 1, result_value));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   } else {
     NAPI_OK(napi_create_array_with_length(env, 2, &result));
-    NAPI_OK(napi_get_boolean(env, worker->out_exists, &result_exists));
-    NAPI_OK(napi_create_buffer_copy(env,
-                                    worker->out_value_len,
-                                    worker->out_value,
-                                    NULL,
-                                    &result_value));
 
-    NAPI_OK(napi_set_element(env, result, 0, result_exists));
+    if (worker->out_exists) {
+      NAPI_OK(napi_create_buffer_copy(env,
+                                      worker->out_value_len,
+                                      worker->out_value,
+                                      NULL,
+                                      &result_value));
+    } else {
+      NAPI_OK(napi_get_null(env, &result_value));
+    }
+
+    NAPI_OK(napi_create_int32(env, URKEL_OK, &result_code));
+    NAPI_OK(napi_set_element(env, result, 0, result_code));
     NAPI_OK(napi_set_element(env, result, 1, result_value));
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
