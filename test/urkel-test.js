@@ -440,8 +440,6 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
       }
     }
 
-    // No stats currently. TODO: Maybe introduce these
-    // in liburkel ?
     {
       const stat1 = await tree.stat();
       await tree.compact();

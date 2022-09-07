@@ -511,6 +511,7 @@ NURKEL_METHOD(tx_get_sync) {
   size_t key_hash_len = 0;
   uint8_t value[URKEL_VALUE_SIZE];
   size_t value_len = 0;
+  int res;
 
   NURKEL_ARGV(2);
   NURKEL_TX_CONTEXT();
@@ -525,16 +526,24 @@ NURKEL_METHOD(tx_get_sync) {
 
   JS_ASSERT(key_hash_len == URKEL_HASH_SIZE, JS_ERR_ARG);
 
-  if (!urkel_tx_get(ntx->tx, value, &value_len, key_hash))
-    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to tx get key.");
+  res = urkel_tx_get(ntx->tx, value, &value_len, key_hash);
 
-  JS_NAPI_OK(napi_create_buffer_copy(env,
-                                     value_len,
-                                     value,
-                                     NULL,
-                                     &result), JS_ERR_NODE);
+  if (res) {
+    JS_NAPI_OK(napi_create_buffer_copy(env,
+                                       value_len,
+                                       value,
+                                       NULL,
+                                       &result), JS_ERR_NODE);
 
-  return result;
+    return result;
+  }
+
+  if (urkel_errno == URKEL_ENOTFOUND) {
+    JS_NAPI_OK(napi_get_null(env, &result), JS_ERR_NODE);
+    return result;
+  }
+
+  JS_THROW_CODE(urkel_errno, "Failed to tx get key.");
 }
 
 NURKEL_EXEC(tx_get) {
@@ -542,17 +551,25 @@ NURKEL_EXEC(tx_get) {
 
   nurkel_tx_get_worker_t *worker = data;
   nurkel_tx_t *ntx = worker->ctx;
+  int res = urkel_tx_get(ntx->tx,
+                          worker->out_value,
+                          &worker->out_value_len,
+                          worker->in_key);
 
-  if (!urkel_tx_get(ntx->tx,
-                    worker->out_value,
-                    &worker->out_value_len,
-                    worker->in_key)) {
-    worker->err_res = urkel_errno;
-    worker->success = false;
+  if (res) {
+    worker->success = true;
+    worker->out_has_key = true;
     return;
   }
 
-  worker->success = true;
+  if (urkel_errno == URKEL_ENOTFOUND) {
+    worker->success = true;
+    worker->out_has_key = false;
+    return;
+  }
+
+  worker->err_res = urkel_errno;
+  worker->success = false;
 }
 
 NURKEL_COMPLETE(tx_get) {
@@ -568,6 +585,9 @@ NURKEL_COMPLETE(tx_get) {
                                 "Failed to tx get.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+  } else if (!worker->out_has_key) {
+    NAPI_OK(napi_get_null(env, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   } else {
     NAPI_OK(napi_create_buffer_copy(env,
                                     worker->out_value_len,
@@ -637,7 +657,7 @@ NURKEL_METHOD(tx_has_sync) {
 
   if (!urkel_tx_has(ntx->tx, key_buffer)) {
     if (urkel_errno != URKEL_ENOTFOUND)
-      JS_THROW(urkel_errors[urkel_errno - 1]);
+      JS_THROW(urkel_errors[urkel_errno]);
 
     has_key = false;
   }
@@ -757,7 +777,7 @@ NURKEL_METHOD(tx_insert_sync) {
   memcpy(value_buffer, val_buffer, value_len);
 
   if (!urkel_tx_insert(ntx->tx, key_buffer, value_buffer, value_len))
-    JS_THROW(urkel_errors[urkel_errno - 1]);
+    JS_THROW(urkel_errors[urkel_errno]);
 
   return result;
 }
@@ -868,7 +888,7 @@ NURKEL_METHOD(tx_remove_sync) {
   JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
 
   if (!urkel_tx_remove(ntx->tx, key_buffer))
-    JS_THROW(urkel_errors[urkel_errno - 1]);
+    JS_THROW(urkel_errors[urkel_errno]);
 
   return result;
 }
@@ -966,7 +986,7 @@ NURKEL_METHOD(tx_prove_sync) {
   NURKEL_JS_HASH_OK(argv[1], in_key);
 
   if (!urkel_tx_prove(ntx->tx, &out_proof_raw, &out_proof_len, in_key))
-    JS_THROW(urkel_errors[urkel_errno - 1]);
+    JS_THROW(urkel_errors[urkel_errno]);
 
   status = napi_create_external_buffer(env,
                                        out_proof_len,
@@ -1078,7 +1098,7 @@ NURKEL_METHOD(tx_commit_sync) {
   NURKEL_TX_READY();
 
   if (!urkel_tx_commit(ntx->tx))
-    JS_THROW(urkel_errors[urkel_errno - 1]);
+    JS_THROW(urkel_errors[urkel_errno]);
 
   urkel_tx_root(ntx->tx, tx_root);
 
@@ -1260,7 +1280,7 @@ NURKEL_METHOD(tx_inject_sync) {
   NURKEL_JS_HASH_OK(argv[1], in_root);
 
   if (!urkel_tx_inject(ntx->tx, in_root))
-    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to tx_inject_sync.");
+    JS_THROW_CODE(urkel_errno, "Failed to tx_inject_sync.");
 
   JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
   return result;

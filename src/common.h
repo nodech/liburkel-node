@@ -16,6 +16,8 @@
  * Urkel errors
  */
 
+#define URKEL_OK 0
+
 /* Errnos start with 1, 0 = everything's ok. */
 extern const char *urkel_errors[];
 extern const int urkel_errors_len;

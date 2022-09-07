@@ -575,7 +575,7 @@ NURKEL_METHOD(destroy_sync) {
              JS_ERR_ARG);
 
   if (!urkel_destroy(path))
-    JS_THROW_CODE(urkel_errors[urkel_errno - 1], JS_ERR_URKEL_DESTROY);
+    JS_THROW_CODE(urkel_errno, JS_ERR_URKEL_DESTROY);
 
   JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
   return result;
@@ -785,7 +785,7 @@ NURKEL_METHOD(inject_sync) {
   NURKEL_JS_HASH_OK(argv[1], in_root);
 
   if (!urkel_inject(ntree->tree, in_root))
-    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to inject_sync.");
+    JS_THROW_CODE(urkel_errno, "Failed to inject_sync.");
 
   JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
   return result;
@@ -875,22 +875,31 @@ NURKEL_METHOD(get_sync) {
   uint8_t key[URKEL_HASH_SIZE];
   uint8_t value[URKEL_VALUE_SIZE];
   size_t value_len;
+  int res;
 
   NURKEL_ARGV(2);
   NURKEL_TREE_CONTEXT();
   NURKEL_TREE_READY();
   NURKEL_JS_HASH_OK(argv[1], key);
 
-  if (!urkel_get(ntree->tree, value, &value_len, key, NULL))
-    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to get.");
+  res = urkel_get(ntree->tree, value, &value_len, key, NULL);
 
-  JS_NAPI_OK(napi_create_buffer_copy(env,
-                                     value_len,
-                                     value,
-                                     NULL,
-                                     &result), JS_ERR_NODE);
+  if (res) {
+    JS_NAPI_OK(napi_create_buffer_copy(env,
+                                       value_len,
+                                       value,
+                                       NULL,
+                                       &result), JS_ERR_NODE);
 
-  return result;
+    return result;
+  }
+
+  if (urkel_errno == URKEL_ENOTFOUND) {
+    JS_NAPI_OK(napi_get_null(env, &result), JS_ERR_NODE);
+    return result;
+  }
+
+  JS_THROW_CODE(urkel_errno, "Failed to get.");
 }
 
 NURKEL_EXEC(get) {
@@ -898,18 +907,26 @@ NURKEL_EXEC(get) {
 
   nurkel_get_worker_t *worker = data;
   nurkel_tree_t *ntree = worker->ctx;
+  int res = urkel_get(ntree->tree,
+                      worker->out_value,
+                      &worker->out_value_len,
+                      worker->in_key,
+                      NULL);
 
-  if (!urkel_get(ntree->tree,
-                 worker->out_value,
-                 &worker->out_value_len,
-                 worker->in_key,
-                 NULL)) {
-    worker->err_res = urkel_errno;
-    worker->success = false;
+  if (res) {
+    worker->success = true;
+    worker->out_has_key = true;
     return;
   }
 
-  worker->success = true;
+  if (urkel_errno == URKEL_ENOTFOUND) {
+    worker->success = true;
+    worker->out_has_key = false;
+    return;
+  }
+
+  worker->success = false;
+  worker->err_res = urkel_errno;
 }
 
 NURKEL_COMPLETE(get) {
@@ -925,6 +942,9 @@ NURKEL_COMPLETE(get) {
                                 "Failed to get.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+  } else if (!worker->out_has_key) {
+    NAPI_OK(napi_get_null(env, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   } else {
     NAPI_OK(napi_create_buffer_copy(env,
                                     worker->out_value_len,
@@ -952,6 +972,7 @@ NURKEL_METHOD(get) {
   JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
   WORKER_INIT(worker);
   worker->ctx = ntree;
+  worker->out_has_key = false;
 
   NURKEL_JS_HASH(argv[1], worker->in_key);
 
@@ -993,7 +1014,7 @@ NURKEL_METHOD(has_sync) {
 
   if (!urkel_has(ntree->tree, key, NULL)) {
     if (urkel_errno != URKEL_ENOTFOUND)
-      JS_THROW(urkel_errors[urkel_errno - 1]);
+      JS_THROW(urkel_errors[urkel_errno]);
 
     has_key = false;
   }
@@ -1124,7 +1145,7 @@ NURKEL_METHOD(prove_sync) {
   NURKEL_JS_HASH_OK(argv[1], in_key);
 
   if (!urkel_prove(ntree->tree, &out_proof_raw, &out_proof_len, in_key, NULL))
-    JS_THROW(urkel_errors[urkel_errno - 1]);
+    JS_THROW(urkel_errors[urkel_errno]);
 
   status = napi_create_external_buffer(env,
                                        out_proof_len,
@@ -1251,7 +1272,7 @@ NURKEL_METHOD(verify_sync) {
   int exists = 0;
 
   if (!urkel_verify(&exists, value, &value_len, proof, proof_len, key, root))
-    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to verify_sync.");
+    JS_THROW_CODE(urkel_errno, "Failed to verify_sync.");
 
   JS_NAPI_OK(napi_create_array_with_length(env, 2, &result), JS_ERR_NODE);
   JS_NAPI_OK(napi_get_boolean(env, exists, &result_exists), JS_ERR_NODE);
@@ -1410,7 +1431,7 @@ NURKEL_METHOD(compact_sync) {
   if (!urkel_compact(dst, src, root_ptr)) {
     free(src);
     free(dst);
-    JS_THROW_CODE(urkel_errors[urkel_errno - 1], "Failed to compact_sync.");
+    JS_THROW_CODE(urkel_errno, "Failed to compact_sync.");
   }
 
   return result;
@@ -1526,7 +1547,7 @@ NURKEL_METHOD(stat_sync) {
 
   if (!urkel_stat(in_prefix, &st)) {
     free(in_prefix);
-    JS_THROW(urkel_errors[urkel_errno - 1]);
+    JS_THROW(urkel_errors[urkel_errno]);
   }
 
   status = napi_create_object(env, &result);

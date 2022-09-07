@@ -29,7 +29,7 @@
 } while (0)
 
 #define JS_THROW_CODE(code, msg) do {                     \
-  CHECK(napi_throw_error(env, (code), (msg)) == napi_ok); \
+  CHECK(napi_throw_error(env, urkel_errors[(code)], (msg)) == napi_ok); \
   return NULL;                                            \
 } while(0)
 

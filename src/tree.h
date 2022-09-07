@@ -64,6 +64,7 @@ typedef struct nurkel_get_worker_s {
 
   uint8_t out_value[URKEL_VALUE_SIZE];
   size_t out_value_len;
+  bool out_has_key;
 } nurkel_get_worker_t;
 
 typedef struct nurkel_inject_worker_s {

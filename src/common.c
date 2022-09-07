@@ -8,6 +8,7 @@
 
 const char *
 urkel_errors[] = {
+  "URKEL_OK",
   "URKEL_EHASHMISMATCH",
   "URKEL_ESAMEKEY",
   "URKEL_ESAMEPATH",

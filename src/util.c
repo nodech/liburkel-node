@@ -63,7 +63,7 @@ nurkel_create_error(napi_env env, int err_res, char *msg, napi_value *result) {
   if (err_res > 0 && err_res <= urkel_errors_len) {
     has_err_res = true;
     status = napi_create_string_latin1(env,
-                                       urkel_errors[err_res - 1],
+                                       urkel_errors[err_res],
                                        NAPI_AUTO_LENGTH,
                                        &ncode);
   } else {
