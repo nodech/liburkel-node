@@ -223,6 +223,123 @@ async function bench(prefix) {
   return tree.close();
 }
 
+async function benchVTX(prefix) {
+  const tree = new Tree({ prefix });
+  const items = [];
+
+  await tree.open();
+
+  let batch = tree.vbatch();
+  await batch.open();
+
+  for (let i = 0; i < 100000; i++) {
+    const r = Math.random() > 0.5;
+    const key = crypto.randomBytes(tree.bits >>> 3);
+    const value = crypto.randomBytes(r ? 100 : 1);
+
+    items.push([key, value]);
+  }
+
+  {
+    const now = util.now();
+
+    for (const [key, value] of items)
+      await batch.insert(key, value);
+
+    console.log('Insert: %d.', util.now() - now);
+  }
+
+  {
+    const now = util.now();
+
+    for (const [key] of items)
+      assert(await batch.get(key));
+
+    console.log('Get (cached): %d.', util.now() - now);
+  }
+
+  {
+    const now = util.now();
+
+    await batch.commit();
+
+    console.log('Commit: %d.', util.now() - now);
+  }
+
+  await batch.close();
+  await tree.close();
+  await tree.open();
+
+  {
+    const now = util.now();
+
+    for (const [key] of items)
+      assert(await tree.get(key));
+
+    console.log('Get (uncached): %d.', util.now() - now);
+  }
+
+  batch = tree.vbatch();
+  await batch.open();
+
+  {
+    const now = util.now();
+
+    for (let i = 0; i < items.length; i++) {
+      const [key] = items[i];
+
+      if (i & 1)
+        await batch.remove(key);
+    }
+
+    console.log('Remove: %d.', util.now() - now);
+  }
+
+  {
+    const now = util.now();
+
+    await batch.commit();
+
+    console.log('Commit: %d.', util.now() - now);
+  }
+
+  {
+    const now = util.now();
+
+    await batch.commit();
+
+    console.log('Commit (nothing): %d.', util.now() - now);
+  }
+
+  await tree.close();
+  await tree.open();
+
+  {
+    const root = tree.rootHash();
+    const [key] = items[items.length - 100];
+
+    let proof = null;
+
+    {
+      const now = util.now();
+
+      proof = await tree.prove(key);
+
+      console.log('Proof: %d.', util.now() - now);
+    }
+
+    {
+      const now = util.now();
+      const [code, value] = await verify(root, key, proof);
+      assert(code === 0);
+      assert(value);
+      console.log('Verify: %d.', util.now() - now);
+    }
+  }
+
+  return tree.close();
+}
+
 (async () => {
   const arg = argv.length >= 3
     ? argv[2]
@@ -235,8 +352,11 @@ async function bench(prefix) {
     case 'bench':
       console.log('Benchmarking (disk)...');
       return bench(FILE);
+    case 'benchVTX':
+      console.log('Benchmarking VTX (disk)...');
+      return benchVTX(FILE);
     default:
-      console.log('Choose either stress or bench...');
+      console.log('Choose either stress, bench or benchVTX...');
       return null;
   }
 })().catch((err) => {

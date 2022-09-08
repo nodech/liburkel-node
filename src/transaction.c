@@ -1363,3 +1363,259 @@ NURKEL_METHOD(tx_inject) {
 
   return result;
 }
+
+NURKEL_METHOD(tx_apply_sync) {
+  napi_value result;
+  uint32_t length, i;
+
+  NURKEL_ARGV(2);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+
+  JS_NAPI_OK(napi_get_array_length(env, argv[1], &length), JS_ERR_ARG);
+  JS_ASSERT(length != 0, JS_ERR_ARG);
+
+  for (i = 0; i < length; i++) {
+    napi_handle_scope scope;
+    JS_NAPI_OK(napi_open_handle_scope(env, &scope), JS_ERR_NODE);
+
+    {
+      napi_value element, js_op, js_key, js_value;
+      uint32_t op;
+      uint8_t *key, *value;
+      size_t key_len, value_len;
+
+      JS_NAPI_OK(napi_get_element(env, argv[1], i, &element), JS_ERR_ARG);
+
+      JS_NAPI_OK(napi_get_element(env, element, 0, &js_op), JS_ERR_ARG);
+      JS_NAPI_OK(napi_get_value_uint32(env, js_op, &op), JS_ERR_ARG);
+
+      JS_NAPI_OK(napi_get_element(env, element, 1, &js_key), JS_ERR_ARG);
+      JS_NAPI_OK(napi_get_buffer_info(env,
+                                      js_key,
+                                      (void **)&key,
+                                      &key_len), JS_ERR_NODE);
+      JS_ASSERT(key_len == URKEL_HASH_SIZE, JS_ERR_ARG);
+
+      switch (op) {
+        case VTX_OP_INSERT: {
+          JS_NAPI_OK(napi_get_element(env, element, 2, &js_value), JS_ERR_ARG);
+          JS_NAPI_OK(napi_get_buffer_info(env,
+                                          js_value,
+                                          (void **)&value,
+                                          &value_len), JS_ERR_NODE);
+          if (!urkel_tx_insert(ntx->tx, key, value, value_len))
+            JS_THROW(urkel_errors[urkel_errno]);
+          break;
+        }
+        case VTX_OP_REMOVE: {
+          if (!urkel_tx_remove(ntx->tx, key))
+            JS_THROW(urkel_errors[urkel_errno]);
+          break;
+        }
+        default: {
+          JS_THROW(JS_ERR_INCORRECT_OP);
+        }
+      }
+    }
+
+    JS_NAPI_OK(napi_close_handle_scope(env, scope), JS_ERR_NODE);
+  }
+
+  napi_get_undefined(env, &result);
+  return result;
+}
+
+NURKEL_EXEC(tx_apply) {
+  (void)env;
+
+  uint32_t i;
+  nurkel_tx_apply_worker_t *worker = data;
+  nurkel_tx_t *ntx = worker->ctx;
+
+  for (i = 0; i < worker->in_ops_len; i++) {
+    nurkel_tx_op_t *op = &worker->in_ops[i];
+
+    switch (op->op) {
+      case VTX_OP_INSERT: {
+        if (!urkel_tx_insert(ntx->tx, op->key, op->value, op->value_len))
+          goto fail;
+        break;
+      }
+      case VTX_OP_REMOVE: {
+        if (!urkel_tx_remove(ntx->tx, op->key))
+          goto fail;
+        break;
+      }
+      default: {
+        /* We have already verified types. */
+        CHECK(false);
+      }
+    }
+  }
+  worker->success = true;
+  return;
+
+fail:
+  worker->err_res = urkel_errno;
+  worker->success = false;
+}
+
+NURKEL_COMPLETE(tx_apply) {
+  napi_value result;
+  nurkel_tx_apply_worker_t *worker = data;
+  nurkel_tx_t *ntx = worker->ctx;
+  uint32_t i;
+
+  ntx->workers--;
+
+  if (status != napi_ok || worker->success == false) {
+    NAPI_OK(nurkel_create_error(env,
+                                worker->err_res,
+                                "Failed to tx apply.",
+                                &result));
+    NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+  } else {
+    NAPI_OK(napi_get_undefined(env, &result));
+    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  }
+
+  for (i = 0; i < worker->in_ops_len; i++) {
+    nurkel_tx_op_t *op = &worker->in_ops[i];
+
+    if (op->key_ref != NULL)
+      napi_delete_reference(env, op->key_ref);
+
+    if (op->value_ref != NULL)
+      napi_delete_reference(env, op->value_ref);
+  }
+
+  NAPI_OK(napi_delete_async_work(env, worker->work));
+  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
+  free(worker->in_ops);
+  free(worker);
+}
+
+NURKEL_METHOD(tx_apply) {
+  napi_value result;
+  napi_status status;
+  nurkel_tx_apply_worker_t *worker;
+  uint32_t length, i, j;
+  char *err;
+
+  NURKEL_ARGV(2);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+
+  JS_NAPI_OK(napi_get_array_length(env, argv[1], &length), JS_ERR_ARG);
+  JS_ASSERT(length != 0, JS_ERR_ARG);
+
+  worker = malloc(sizeof(nurkel_tx_apply_worker_t));
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
+  WORKER_INIT(worker);
+  worker->ctx = ntx;
+  worker->in_ops = NULL;
+  worker->in_ops_len = 0;
+
+  worker->in_ops = malloc(sizeof(nurkel_tx_op_t) * length);
+  if (worker->in_ops == NULL) {
+    free(worker);
+    JS_THROW(JS_ERR_ALLOC);
+  }
+  memset(worker->in_ops, 0, sizeof(nurkel_tx_op_t) * length);
+  worker->in_ops_len = length;
+
+#define LOOP_THROW do { \
+  fail = true;          \
+  goto loop_end;        \
+} while(0)
+
+#define LOOP_NAPI_OK(status) do { \
+  if (status != napi_ok) {        \
+    fail = true;                  \
+    goto loop_end;                \
+  }                               \
+} while(0)
+
+  for (i = 0; i < length; i++) {
+    napi_handle_scope scope;
+    napi_open_handle_scope(env, &scope);
+    bool fail = false;
+
+    {
+      napi_value element, js_op, js_key, js_value;
+      nurkel_tx_op_t *op = &worker->in_ops[i];
+      size_t key_len;
+
+      LOOP_NAPI_OK(napi_get_element(env, argv[1], i, &element));
+      LOOP_NAPI_OK(napi_get_element(env, element, 0, &js_op));
+      LOOP_NAPI_OK(napi_get_element(env, element, 1, &js_key));
+      LOOP_NAPI_OK(napi_get_value_uint32(env, js_op, &op->op));
+
+      status = napi_get_buffer_info(env, js_key, (void **)&op->key, &key_len);
+
+      if (status != napi_ok || key_len != URKEL_HASH_SIZE)
+        LOOP_THROW;
+
+      LOOP_NAPI_OK(napi_create_reference(env, js_key, 1, &op->key_ref));
+
+      switch (op->op) {
+        case VTX_OP_INSERT: {
+          LOOP_NAPI_OK(napi_get_element(env, element, 2, &js_value));
+          LOOP_NAPI_OK(napi_get_buffer_info(env,
+                                            js_value,
+                                            (void **)&op->value,
+                                            &op->value_len));
+          LOOP_NAPI_OK(napi_create_reference(env, js_value, 1, &op->value_ref));
+          break;
+        }
+        case VTX_OP_REMOVE: {
+          break;
+        }
+        default: {
+          LOOP_THROW;
+        }
+      }
+    }
+
+loop_end:
+    napi_close_handle_scope(env, scope);
+    if (fail) {
+      err = JS_ERR_ARG;
+      goto throw;
+    }
+  }
+#undef LOOP_NAPI_OK
+#undef LOOP_THROW
+
+  NURKEL_CREATE_ASYNC_WORK(tx_apply, worker, result);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  ntx->workers++;
+  status = napi_queue_async_work(env, worker->work);
+
+  if (status != napi_ok) {
+    ntx->workers--;
+    napi_delete_async_work(env, worker->work);
+    err = JS_ERR_NODE;
+    goto throw;
+  }
+
+  return result;
+
+throw:
+  /* Clean up references */
+  for (j = 0; j < i + 1; j++) {
+    nurkel_tx_op_t *op = &worker->in_ops[i];
+
+    if (op->key_ref != NULL)
+      napi_delete_reference(env, op->key_ref);
+
+    if (op->value_ref != NULL)
+      napi_delete_reference(env, op->value_ref);
+  }
+
+  free(worker->in_ops);
+  free(worker);
+  JS_THROW(err);
+}

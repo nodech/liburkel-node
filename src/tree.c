@@ -4,7 +4,6 @@
  * https://github.com/nodech/nurkel
  */
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <node_api.h>

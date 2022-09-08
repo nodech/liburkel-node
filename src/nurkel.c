@@ -7,7 +7,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 
 #include <urkel.h>
@@ -86,7 +85,9 @@ NAPI_MODULE_INIT() {
     F(tx_clear_sync),
     F(tx_clear),
     F(tx_inject_sync),
-    F(tx_inject)
+    F(tx_inject),
+    F(tx_apply),
+    F(tx_apply_sync)
 #undef F
   };
 

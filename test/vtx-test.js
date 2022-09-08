@@ -8,17 +8,13 @@ const {Proof} = nurkel;
 
 const NULL_HASH = Buffer.alloc(32, 0);
 
-for (const memory of [false, true]) {
-describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
+describe('Urkel Virtual Transaction', function () {
   let prefix, tree;
 
   beforeEach(async () => {
     prefix = testdir('tx');
 
-    if (!memory)
-      fs.mkdirSync(prefix);
-
-    tree = nurkel.create({ memory, prefix });
+    tree = nurkel.create({ prefix });
     await tree.open();
   });
 
@@ -30,7 +26,7 @@ describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
   });
 
   it('should get the root', async () => {
-    const txn1 = tree.txn();
+    const txn1 = tree.vtxn();
     await txn1.open();
 
     assert.bufferEqual(txn1.txRootHashSync(), NULL_HASH);
@@ -41,7 +37,7 @@ describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
     if (!tree.supportsSync)
       this.skip();
 
-    const txn1 = tree.txn();
+    const txn1 = tree.vtxn();
     await txn1.open();
 
     const key1 = randomKey();
@@ -61,7 +57,7 @@ describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
   });
 
   it('should insert and get the key', async () => {
-    const txn1 = tree.txn();
+    const txn1 = tree.vtxn();
     await txn1.open();
 
     const key1 = randomKey();
@@ -82,7 +78,7 @@ describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
   });
 
   it('should generate proofs', async () => {
-    const txn1 = tree.txn();
+    const txn1 = tree.vtxn();
     await txn1.open();
 
     const pairs = new Map();
@@ -112,7 +108,7 @@ describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
   });
 
   it('should clear the transaction', async () => {
-    const txn1 = tree.txn();
+    const txn1 = tree.vtxn();
     await txn1.open();
 
     assert.bufferEqual(txn1.rootHash(), NULL_HASH);
@@ -124,7 +120,7 @@ describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
       await txn1.insert(key, value);
     }
 
-    assert.notBufferEqual(txn1.rootHash(), NULL_HASH);
+    assert.notBufferEqual(await txn1.txRootHash(), NULL_HASH);
     await txn1.clear();
     assert.bufferEqual(txn1.rootHash(), NULL_HASH);
 
@@ -146,7 +142,7 @@ describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
     const roots = [];
     const entriesByRoot = [];
 
-    const txn = tree.batch();
+    const txn = tree.vtxn();
     await txn.open();
 
     for (let i = 0; i < ROOTS; i++) {
@@ -248,4 +244,3 @@ describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
     await snap.close();
   });
 });
-}

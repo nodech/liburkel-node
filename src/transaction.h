@@ -15,6 +15,9 @@
 #include "util.h"
 #include "tree.h"
 
+#define VTX_OP_INSERT 1
+#define VTX_OP_REMOVE 2
+
 /*
  * Helper macros for TXs.s
  */
@@ -104,6 +107,21 @@ typedef struct nurkel_tx_inject_worker_s {
   uint8_t in_root[URKEL_HASH_SIZE];
 } nurkel_tx_inject_worker_t;
 
+typedef struct nurkel_tx_op_s {
+  uint32_t op;
+  size_t value_len;
+  napi_ref key_ref;
+  napi_ref value_ref;
+  uint8_t *key;
+  uint8_t *value;
+} nurkel_tx_op_t;
+
+typedef struct nurkel_tx_apply_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t);
+  nurkel_tx_op_t *in_ops;
+  uint32_t in_ops_len;
+} nurkel_tx_apply_worker_t;
+
 /*
  * Transaction life cycle methods.
  */
@@ -150,5 +168,7 @@ NURKEL_METHOD(tx_clear_sync);
 NURKEL_METHOD(tx_clear);
 NURKEL_METHOD(tx_inject_sync);
 NURKEL_METHOD(tx_inject);
+NURKEL_METHOD(tx_apply);
+NURKEL_METHOD(tx_apply_sync);
 
 #endif /* _NURKEL_TX_H */

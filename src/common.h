@@ -54,6 +54,7 @@ extern const char *inst_errors[];
 #define JS_ERR_NODE "Node internal error."
 #define JS_ERR_UNKNOWN "Unknown internal error."
 #define JS_ERR_URKEL_DESTROY "Urkel destroy failed."
+#define JS_ERR_INCORRECT_OP "Bulk apply OPERATION is UNKNOWN."
 
 /*
  * Main state management structs.
