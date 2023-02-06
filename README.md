@@ -6,7 +6,7 @@ Nurkel
 Bindings to [liburkel](https://github.com/chjj/liburkel).
 API tries to be compatible with [urkel](https://github.com/handshake-org/urkel).
 
-Support of Node.js: >= 12.x
+Support of Node.js: >= 14.x
 
 Unfortunately, for now, there are differencies and some features are not yet implemented.
   - Transaction and Snapshot needs `open()` call before using and `close` after using it.
@@ -15,8 +15,8 @@ Unfortunately, for now, there are differencies and some features are not yet imp
   - There are no iterator interfaces.
 
 ### TODOs
+
 There are couple of TODOs provided in the code, but here will be the list of higher level ones:
   - Decide for which methods it is fine to use Sync methods instead of async. (benchmark)
   - Implement Tree Iterator.
   - Implement Transaction Iterator.
-  - Virtual Transaction ?

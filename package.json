@@ -1,6 +1,6 @@
 {
   "name": "nurkel",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Liburkel bindings for node.js",
   "license": "MIT",
   "repository": "git://github.com/nodech/nurkel.git",
@@ -21,7 +21,7 @@
     "bmocha": "^2.1.6"
   },
   "engines": {
-    "node": ">=12.0.0"
+    "node": ">=14.0.0"
   },
   "gypfile": true,
   "dependencies": {
