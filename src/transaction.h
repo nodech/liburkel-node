@@ -117,7 +117,7 @@ typedef struct nurkel_tx_op_s {
 } nurkel_tx_op_t;
 
 typedef struct nurkel_tx_apply_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t);
+  WORKER_BASE_PROPS(nurkel_tx_t)
   nurkel_tx_op_t *in_ops;
   uint32_t in_ops_len;
 } nurkel_tx_apply_worker_t;

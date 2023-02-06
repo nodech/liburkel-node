@@ -246,6 +246,7 @@ nurkel_ntree_destroy(napi_env env, void *data, void *hint) {
     return;
   }
 
+  napi_delete_reference(env, ntree->ref);
   free(ntree);
 }
 
@@ -536,13 +537,6 @@ NURKEL_METHOD(root_hash) {
   JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
   worker->ctx = ntree;
 
-  status = napi_create_promise(env, &worker->deferred, &result);
-
-  if (status != napi_ok) {
-    free(worker);
-    JS_THROW(JS_ERR_NODE);
-  }
-
   NURKEL_CREATE_ASYNC_WORK(root_hash, worker, result);
 
   if (status != napi_ok) {
@@ -573,9 +567,12 @@ NURKEL_METHOD(destroy_sync) {
   JS_NAPI_OK(read_value_string_latin1(env, argv[0], &path, &path_len),
              JS_ERR_ARG);
 
-  if (!urkel_destroy(path))
+  if (!urkel_destroy(path)) {
+    free(path);
     JS_THROW_CODE(urkel_errno, JS_ERR_URKEL_DESTROY);
+  }
 
+  free(path);
   JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
   return result;
 }
@@ -1358,6 +1355,7 @@ NURKEL_COMPLETE(verify) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   free(worker->in_proof);
   free(worker);
 }
@@ -1490,6 +1488,7 @@ NURKEL_COMPLETE(compact) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   free(worker->in_root);
   free(worker->in_dst);
   free(worker->in_src);
@@ -1629,6 +1628,7 @@ NURKEL_COMPLETE(stat) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
+  NAPI_OK(napi_delete_async_work(env, worker->work));
   free(worker->in_prefix);
   free(worker);
 }
