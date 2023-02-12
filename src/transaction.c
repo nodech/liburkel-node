@@ -380,7 +380,6 @@ NURKEL_COMPLETE(tx_close) {
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-
   nurkel_unregister_tx(ntx);
   NAPI_OK(napi_delete_async_work(env, worker->work));
   NAPI_OK(nurkel_close_try_close(env, ntree));

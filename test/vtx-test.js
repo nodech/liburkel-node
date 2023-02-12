@@ -77,6 +77,30 @@ describe('Urkel Virtual Transaction', function () {
     await txn1.close();
   });
 
+  it('should insert the same and get the key', async () => {
+    const txn1 = tree.vtxn();
+    await txn1.open();
+
+    const key1 = randomKey();
+    const value = Buffer.from('Hello !');
+    const value2 = Buffer.from('Hello 2!');
+
+    assert.strictEqual(await txn1.has(key1), false);
+    await txn1.insert(key1, value);
+
+    await txn1.insert(key1, value2);
+
+    assert.strictEqual(await txn1.has(key1), true);
+    const resValue = await txn1.get(key1);
+    assert.bufferEqual(resValue, value2);
+    await txn1.remove(key1);
+    assert.strictEqual(await txn1.has(key1), false);
+
+    assert.strictEqual(await txn1.get(key1), null);
+
+    await txn1.close();
+  });
+
   it('should generate proofs', async () => {
     const txn1 = tree.vtxn();
     await txn1.open();
