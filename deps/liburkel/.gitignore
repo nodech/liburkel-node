@@ -9,6 +9,7 @@
 *.o
 *.out
 *.sln
+*.cmake
 *.so
 *.so.*
 *.vcxproj
