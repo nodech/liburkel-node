@@ -1,5 +1,4 @@
 *.a
-*.cmake
 *.dir
 *.dylib
 *.filters
