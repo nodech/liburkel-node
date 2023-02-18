@@ -144,8 +144,11 @@ nurkel_create_work(napi_env env,
                    napi_value *result);
 
 napi_status
-nurkel_get_buffer_copy(napi_env env, napi_value value, uint8_t *out,
-                       size_t *out_len, const size_t expected,
+nurkel_get_buffer_copy(napi_env env,
+                       napi_value value,
+                       uint8_t *out,
+                       size_t *out_len,
+                       const size_t expected,
                        bool expect_lte);
 
 void
