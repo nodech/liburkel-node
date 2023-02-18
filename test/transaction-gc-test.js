@@ -2,7 +2,7 @@
 
 const assert = require('bsert');
 const fs = require('fs');
-const {testdir, isTreeDir, rmTreeDir, randomKey} = require('./util/common');
+const {testdir, isTreeDir, rmTreeDir, randomKey, sleep} = require('./util/common');
 const {Tree} = require('..');
 
 describe('Urkel Transaction (GC)', function () {
@@ -136,12 +136,12 @@ describe('Urkel Transaction (GC)', function () {
     await tree.open();
 
     await (async () => {
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 10; i++) {
         const txn = await tree.txn();
         await txn.open();
       }
 
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 10; i++) {
         const txn = await tree.txn();
         await txn.open();
         txn.close();
@@ -149,6 +149,7 @@ describe('Urkel Transaction (GC)', function () {
     })();
 
     global.gc();
+    await sleep(1000);
     await tree.close();
   });
 

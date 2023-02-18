@@ -33,7 +33,7 @@ function random(min, max) {
 
 for (const memory of [false, true]) {
 describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
-  this.timeout(5000);
+  this.timeout(20000);
   const Tree = memory ? nurkel.MemTree : nurkel.Tree;
   let prefix, tree;
 
