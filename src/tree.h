@@ -143,7 +143,10 @@ void
 nurkel_unregister_tx(struct nurkel_tx_s *ntx);
 
 napi_status
-nurkel_tx_close_work(nurkel_tx_close_params_t params);
+nurkel_tx_queue_close_worker(napi_env env, nurkel_tx_t *ntx, napi_deferred deferred);
+
+napi_status
+nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx);
 
 void
 nurkel_ntree_destroy(napi_env env, void *data, void *hint);

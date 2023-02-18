@@ -121,16 +121,10 @@ nurkel_close_work_txs(nurkel_close_params_t params) {
   napi_env env = params.env;
   nurkel_tree_t *ntree = params.ctx;
   nurkel_tx_entry_t *head = ntree->tx_head;
-  nurkel_tx_close_params_t tx_params = {
-    .env = env,
-    .destroy = params.destroy,
-    .promise = false,
-    .promise_result = NULL
-  };
 
   while (head != NULL) {
-    tx_params.ctx = head->ntx;
-    nurkel_tx_close_work(tx_params);
+    nurkel_tx_queue_close_worker(env, head->ntx, NULL);
+    nurkel_tx_final_check(env, head->ntx);
     head = head->next;
   }
 }

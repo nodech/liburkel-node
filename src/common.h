@@ -39,6 +39,22 @@ enum inst_state {
   inst_state_should_close = 4
 };
 
+enum nurkel_state {
+  nurkel_state_closed = 0,
+  nurkel_state_opening = 1,
+  nurkel_state_open = 2,
+  nurkel_state_closing = 3
+};
+
+enum nurkel_state_err {
+  nurkel_state_err_ok = 0,
+  nurkel_state_err_unknown = 1,
+  nurkel_state_err_opening = 2,
+  nurkel_state_err_closing = 3,
+  nurkel_state_err_closed = 4,
+};
+
+extern const char *state_errors[];
 extern const char *inst_errors[];
 
 /*
@@ -87,15 +103,20 @@ typedef struct nurkel_tree_s {
 typedef struct nurkel_tx_s {
   nurkel_tree_t *ntree;
   urkel_tx_t *tx;
+
+  /** Nurkel tree linked list entry. */
   nurkel_tx_entry_t *entry;
-  uint32_t workers;
-  void *close_worker;
+  /** On open, load the Root hash here. */
   uint8_t init_root[URKEL_HASH_SIZE];
-  bool is_open;
-  bool is_opening;
-  bool is_closing;
-  bool should_close;
-  bool should_cleanup;
+
+  /** Current state of the transaction. */
+  enum nurkel_state state;
+  /** This is incremented every time async work is running and we can't close */
+  uint32_t workers;
+  /** If this is set, it means transaction needs closing. */
+  void *close_worker;
+  /** If this is set, it means transaction needs freeing. */
+  bool will_cleanup;
 } nurkel_tx_t;
 
 /*

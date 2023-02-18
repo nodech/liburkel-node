@@ -33,3 +33,11 @@ const char *inst_errors[] = {
   "is opening.",
   "should close"
 };
+
+const char *state_errors[] = {
+  "ok.",
+  "unknown error.",
+  "is opening.",
+  "is closing.",
+  "is closed"
+};

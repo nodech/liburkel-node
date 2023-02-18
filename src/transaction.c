@@ -8,117 +8,249 @@
 #include <stdlib.h>
 #include "transaction.h"
 
-void
+/*
+ * Workers for async jobs.
+ */
+
+typedef struct nurkel_tx_open_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+} nurkel_tx_open_worker_t;
+
+typedef struct nurkel_tx_close_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+} nurkel_tx_close_worker_t;
+
+typedef struct nurkel_tx_root_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t out_hash[URKEL_HASH_SIZE];
+} nurkel_tx_root_hash_worker_t;
+
+typedef struct nurkel_tx_get_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t in_key[URKEL_HASH_SIZE];
+
+  uint8_t out_value[URKEL_VALUE_SIZE];
+  size_t out_value_len;
+  bool out_has_key;
+} nurkel_tx_get_worker_t;
+
+typedef struct nurkel_tx_has_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t in_key[URKEL_HASH_SIZE];
+
+  bool out_has_key;
+} nurkel_tx_has_worker_t;
+
+typedef struct nurkel_tx_insert_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t in_key[URKEL_HASH_SIZE];
+  uint8_t in_value[URKEL_VALUE_SIZE];
+  size_t in_value_len;
+} nurkel_tx_insert_worker_t;
+
+typedef struct nurkel_tx_remove_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t in_key[URKEL_HASH_SIZE];
+} nurkel_tx_remove_worker_t;
+
+typedef struct nurkel_tx_prove_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t in_key[URKEL_HASH_SIZE];
+  uint8_t *out_proof;
+  size_t out_proof_len;
+} nurkel_tx_prove_worker_t;
+
+typedef struct nurkel_tx_commit_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t out_hash[URKEL_HASH_SIZE];
+} nurkel_tx_commit_worker_t;
+
+typedef struct nurkel_tx_clear_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+} nurkel_tx_clear_worker_t;
+
+typedef struct nurkel_tx_inject_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  uint8_t in_root[URKEL_HASH_SIZE];
+} nurkel_tx_inject_worker_t;
+
+typedef struct nurkel_tx_op_s {
+  uint32_t op;
+  size_t value_len;
+  napi_ref key_ref;
+  napi_ref value_ref;
+  uint8_t *key;
+  uint8_t *value;
+} nurkel_tx_op_t;
+
+typedef struct nurkel_tx_apply_worker_s {
+  WORKER_BASE_PROPS(nurkel_tx_t)
+  nurkel_tx_op_t *in_ops;
+  uint32_t in_ops_len;
+} nurkel_tx_apply_worker_t;
+
+/*
+ * Nurkel related methods.
+ */
+
+static void
 nurkel_ntx_init(nurkel_tx_t *ntx) {
   ntx->tx = NULL;
   ntx->ntree = NULL;
   ntx->entry = NULL;
+
   ntx->close_worker = NULL;
   ntx->workers = 0;
-  ntx->is_open = false;
-  ntx->is_opening = false;
-  ntx->is_closing = false;
-  ntx->should_close = false;
-  ntx->should_cleanup = false;
+  ntx->state = nurkel_state_closed;
+  ntx->will_cleanup = false;
+
   memset(ntx->init_root, 0, URKEL_HASH_SIZE);
 }
 
-enum inst_state
+static enum nurkel_state_err
 nurkel_tx_ready(nurkel_tx_t *ntx) {
-  if (!ntx->is_open)
-    return inst_state_is_closed;
+  if (ntx->close_worker != NULL)
+    return nurkel_state_err_closing;
 
-  if (ntx->is_closing)
-    return inst_state_is_closing;
+  if (ntx->state != nurkel_state_open) {
+    if (ntx->state == nurkel_state_closed)
+      return nurkel_state_err_closed;
 
-  if (ntx->is_opening)
-    return inst_state_is_opening;
+    if (ntx->state == nurkel_state_opening)
+      return nurkel_state_err_opening;
 
-  if (ntx->should_close)
-    return inst_state_should_close;
+    if (ntx->state == nurkel_state_closing)
+      return nurkel_state_err_closing;
+  }
 
-  return inst_state_ok;
+  /* This should never happen, as nurkel_tx_ready is only used by
+   * methods. Will clean up is only queued when object goes out of scope. */
+  CHECK(ntx->will_cleanup == false);
+
+  return nurkel_state_err_ok;
 }
 
+static napi_status
+nurkel_tx_free(napi_env env, nurkel_tx_t *ntx) {
+  CHECK(ntx->state == nurkel_state_closed);
+  nurkel_tree_t *ntree = ntx->ntree;
+  ntx->will_cleanup = false;
+  free(ntx);
+  NAPI_OK(napi_reference_unref(env, ntree->ref, NULL));
+  return napi_ok;
+}
+
+/*
+ * This acts as a queue for close and the destroy.
+ */
+
 napi_status
-nurkel_tx_close_try_close(napi_env env, nurkel_tx_t *ntx) {
-  nurkel_tx_close_worker_t *close_worker;
-
-  if (!ntx->should_close)
-    return napi_ok;
-
+nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx) {
   if (ntx->workers > 0)
     return napi_ok;
 
-  CHECK(ntx->workers == 0);
-  ntx->is_closing = true;
-  close_worker = ntx->close_worker;
-  return napi_queue_async_work(env, close_worker->work);
+  if (ntx->close_worker != NULL) {
+    CHECK(ntx->state == nurkel_state_open);
+    ntx->state = nurkel_state_closing;
+    nurkel_close_worker_t *worker = ntx->close_worker;
+    ntx->workers++;
+    NAPI_OK(napi_queue_async_work(env, worker->work));
+    return napi_ok;
+  }
+
+  if (ntx->will_cleanup) {
+    return nurkel_tx_free(env, ntx);
+  }
+
+  return napi_ok;
 }
 
-void
+napi_status
+nurkel_tx_queue_close_worker(napi_env env,
+                             nurkel_tx_t *ntx,
+                             napi_deferred deferred);
+
+static void
 nurkel_tx_destroy(napi_env env, void *data, void *hint) {
   (void)hint;
 
   CHECK(data != NULL);
 
   nurkel_tx_t *ntx = data;
-  nurkel_tree_t *ntree = ntx->ntree;
 
-  if (ntree->is_closing) {
-    ntx->should_cleanup = true;
-    return;
-  }
+  if (ntx->state != nurkel_state_closed && ntx->close_worker == NULL)
+    NAPI_OK(nurkel_tx_queue_close_worker(env, ntx, NULL));
 
-  if (ntx->is_open || ntx->is_opening) {
-    nurkel_tx_close_params_t params = {
-      .env = env,
-      .ctx = ntx,
-      .destroy = true,
-      .promise = false,
-      .promise_result = NULL
-    };
-
-    NAPI_OK(nurkel_tx_close_work(params));
-    return;
-  }
-
-  if (ntx->should_close) {
-    nurkel_tx_close_worker_t *worker = ntx->close_worker;
-    worker->in_destroy = true;
-    return;
-  }
-
-  nurkel_close_try_close(env, ntree);
-  /* We only allow tree to go out of scope after all txs go out of scope. */
-  NAPI_OK(napi_reference_unref(env, ntree->ref, NULL));
-
-  free(ntx);
+  ntx->will_cleanup = true;
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
-NURKEL_EXEC(tx_close);
-NURKEL_COMPLETE(tx_close);
+static void
+nurkel_close_worker_exec(napi_env env, void *data) {
+  (void)env;
+  nurkel_tx_close_worker_t *worker = data;
+  nurkel_tx_t *ntx = worker->ctx;
+
+  urkel_tx_destroy(ntx->tx);
+  ntx->tx = NULL;
+  worker->success = true;
+}
+
+static void
+nurkel_close_worker_complete(napi_env env, napi_status status, void *data) {
+  nurkel_tx_clear_worker_t *worker = data;
+  nurkel_tx_t *ntx = worker->ctx;
+  nurkel_tree_t *ntree = ntx->ntree;
+
+  /* Unset the queued close worker. */
+  ntx->close_worker = NULL;
+  ntx->state = nurkel_state_closed;
+  ntx->workers--;
+
+  if (worker->deferred != NULL) {
+    napi_value result;
+
+    if (status != napi_ok || worker->success != true) {
+      NAPI_OK(nurkel_create_error(env,
+                                  worker->err_res,
+                                  "Failed to close transaction.",
+                                  &result));
+      NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+    } else {
+      NAPI_OK(napi_get_undefined(env, &result));
+      NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+    }
+  }
+
+  nurkel_unregister_tx(ntx);
+  NAPI_OK(napi_delete_async_work(env, worker->work));
+  NAPI_OK(nurkel_close_try_close(env, ntree));
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
+  free(worker);
+}
 
 napi_status
-nurkel_tx_close_work(nurkel_tx_close_params_t params) {
+nurkel_tx_queue_close_worker(napi_env env,
+                             nurkel_tx_t *ntx,
+                             napi_deferred deferred) {
+  CHECK(ntx != NULL);
+
+  /* If close worker is not queued by the tx_close, then
+   * we don't expect state to be open (it could be opening) */
+  if (deferred != NULL) {
+    CHECK(ntx->close_worker == NULL);
+    CHECK(ntx->state == nurkel_state_open);
+  }
+
+  /* If we have already qeueud close worker, just ignore another request */
+  if (ntx->close_worker != NULL)
+    return napi_ok;
+
   napi_value workname;
   napi_status status;
   nurkel_tx_close_worker_t *worker;
-  nurkel_tx_t *ntx = params.ctx;
 
-  CHECK(ntx != NULL);
-
-  if (ntx->is_closing || ntx->should_close) {
-    if (params.promise) {
-      return napi_throw_error(params.env,
-                              "",
-                              "Failed to tx_close, it is already closing.");
-    }
-
-    return napi_ok;
-  }
-
-  status = napi_create_string_latin1(params.env,
+  status = napi_create_string_latin1(env,
                                      "nurkel_tx_close",
                                      NAPI_AUTO_LENGTH,
                                      &workname);
@@ -127,51 +259,28 @@ nurkel_tx_close_work(nurkel_tx_close_params_t params) {
     return status;
 
   worker = malloc(sizeof(nurkel_tx_close_worker_t));
+
   if (worker == NULL)
     return napi_generic_failure;
 
   WORKER_INIT(worker);
   worker->ctx = ntx;
-  worker->in_destroy = params.destroy;
+  worker->deferred = deferred;
 
-  if (params.promise) {
-    status = napi_create_promise(params.env,
-                                 &worker->deferred,
-                                 params.promise_result);
-
-    if (status != napi_ok) {
-      free(worker);
-      return status;
-    }
-  }
-
-  status = napi_create_async_work(params.env,
+  status = napi_create_async_work(env,
                                   NULL,
                                   workname,
-                                  NURKEL_EXEC_NAME(tx_close),
-                                  NURKEL_COMPLETE_NAME(tx_close),
+                                  nurkel_close_worker_exec,
+                                  nurkel_close_worker_complete,
                                   worker,
                                   &worker->work);
+
   if (status != napi_ok) {
     free(worker);
     return status;
   }
 
-  if (ntx->workers > 0 || ntx->is_opening) {
-    ntx->should_close = true;
-    ntx->close_worker = worker;
-    return napi_ok;
-  }
-
-  CHECK(ntx->workers == 0);
-  ntx->is_closing = true;
-  status = napi_queue_async_work(params.env, worker->work);
-
-  if (status != napi_ok) {
-    napi_delete_async_work(params.env, worker->work);
-    free(worker);
-    return napi_generic_failure;
-  }
+  ntx->close_worker = worker;
 
   return napi_ok;
 }
@@ -232,14 +341,12 @@ NURKEL_COMPLETE(tx_open) {
 
   nurkel_tx_open_worker_t *worker = data;
   nurkel_tx_t *ntx = worker->ctx;
-  nurkel_tree_t *ntree = ntx->ntree;
   napi_value result;
 
   ntx->workers--;
+  ntx->state = nurkel_state_closed;
 
   if (status != napi_ok || worker->success == false) {
-    ntx->is_opening = false;
-
     nurkel_unregister_tx(ntx);
     NAPI_OK(nurkel_create_error(env,
                                 worker->err_res,
@@ -247,22 +354,14 @@ NURKEL_COMPLETE(tx_open) {
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
   } else {
-    ntx->is_open = true;
-    ntx->is_opening = false;
+    ntx->state = nurkel_state_open;
     NAPI_OK(napi_get_undefined(env, &result));
     NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
   }
 
-  /* At this point, tree could have started closing and waiting for tx ? */
-  /* We are closing right away.. Tree must have said so.. */
-  if (ntx->should_close) {
-    /* Sanity check */
-    CHECK(ntree->should_close == true);
-    nurkel_tx_close_try_close(env, ntx);
-  }
-
   NAPI_OK(napi_delete_async_work(env, worker->work));
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 /*
@@ -294,8 +393,11 @@ NURKEL_METHOD(tx_open) {
   JS_ASSERT(status == napi_ok, JS_ERR_ARG);
   JS_ASSERT(ntx != NULL, JS_ERR_ARG);
 
-  JS_ASSERT(!ntx->is_open && !ntx->is_opening, "Transaction is already open.");
-  JS_ASSERT(!ntx->is_closing, "Transaction is closing.");
+  JS_ASSERT(ntx->state != nurkel_state_open, "Transaction is already open.");
+  JS_ASSERT(ntx->state != nurkel_state_opening, "Transaction is already opening.");
+  JS_ASSERT(ntx->state != nurkel_state_closing, "Transaction is still closing.");
+  JS_ASSERT(ntx->state == nurkel_state_closed, "Transaction is not closed.");
+
   ntree = ntx->ntree;
   NURKEL_TREE_READY();
 
@@ -331,83 +433,35 @@ NURKEL_METHOD(tx_open) {
 
   /* Make sure Tree does not close and free while we are working with it. */
   nurkel_register_tx(ntx);
-  ntx->is_opening = true;
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
     nurkel_unregister_tx(ntx);
-    ntree->is_opening = false;
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_NODE);
   }
 
+  ntx->workers++;
+  ntx->state = nurkel_state_opening;
   return result;
-}
-
-NURKEL_EXEC(tx_close) {
-  (void)env;
-  nurkel_tx_close_worker_t *worker = data;
-  nurkel_tx_t *ntx = worker->ctx;
-
-  urkel_tx_destroy(ntx->tx);
-  ntx->tx = NULL;
-  worker->success = true;
-}
-
-NURKEL_COMPLETE(tx_close) {
-  nurkel_tx_close_worker_t *worker = data;
-  nurkel_tx_t *ntx = worker->ctx;
-  nurkel_tree_t *ntree = ntx->ntree;
-  napi_value result;
-
-  ntx->is_closing = false;
-  ntx->is_opening = false;
-  ntx->is_open = false;
-  ntx->should_close = false;
-  ntx->close_worker = NULL;
-
-  if (worker->deferred != NULL && status != napi_ok) {
-    NAPI_OK(nurkel_create_error(env,
-                                worker->err_res,
-                                "Failed to tx close.",
-                                &result));
-    NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-  } else if (worker->deferred != NULL) {
-    NAPI_OK(napi_get_undefined(env, &result));
-    NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
-  }
-
-  nurkel_unregister_tx(ntx);
-  NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_close_try_close(env, ntree));
-
-  if (worker->in_destroy || ntx->should_cleanup) {
-    NAPI_OK(napi_reference_unref(env, ntree->ref, NULL));
-    free(ntx);
-  }
-  free(worker);
 }
 
 NURKEL_METHOD(tx_close) {
   napi_value result;
   napi_status status;
-  nurkel_tx_close_params_t params;
+  napi_deferred deferred;
 
   NURKEL_ARGV(1);
   NURKEL_TX_CONTEXT();
   NURKEL_TX_READY();
 
-  params.env = env;
-  params.ctx = ntx;
-  params.promise = true;
-  params.promise_result = &result;
-  params.destroy = false;
+  status = napi_create_promise(env, &deferred, &result);
+  JS_ASSERT(status == napi_ok, "Failed to create promise.");
 
-  status = nurkel_tx_close_work(params);
-  JS_ASSERT(status == napi_ok, "Failed to start tx close worker.");
+  status = nurkel_tx_queue_close_worker(env, ntx, deferred);
+  JS_ASSERT(status == napi_ok, "Failed to setup close worker.");
+  JS_ASSERT(nurkel_tx_final_check(env, ntx) == napi_ok, "Failed to run final checks.");
 
   return result;
 }
@@ -455,7 +509,6 @@ NURKEL_COMPLETE(tx_root_hash) {
                                 "Failed to get tx_root_hash.",
                                 &result));
     NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
-    NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   } else {
     NAPI_OK(napi_create_buffer_copy(env,
                                     URKEL_HASH_SIZE,
@@ -466,8 +519,8 @@ NURKEL_COMPLETE(tx_root_hash) {
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_root_hash) {
@@ -490,15 +543,15 @@ NURKEL_METHOD(tx_root_hash) {
     JS_THROW(JS_ERR_NODE);
   }
 
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_NODE);
   }
+
+  ntx->workers++;
 
   return result;
 }
@@ -597,9 +650,8 @@ NURKEL_COMPLETE(tx_get) {
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
-  return;
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_get) {
@@ -630,16 +682,15 @@ NURKEL_METHOD(tx_get) {
     JS_THROW(JS_ERR_NODE);
   }
 
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_NODE);
   }
 
+  ntx->workers++;
   return result;
 }
 
@@ -706,8 +757,8 @@ NURKEL_COMPLETE(tx_has) {
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_has) {
@@ -738,15 +789,15 @@ NURKEL_METHOD(tx_has) {
     JS_THROW(JS_ERR_NODE);
   }
 
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_NODE);
   }
+
+  ntx->workers++;
 
   return result;
 }
@@ -816,8 +867,8 @@ NURKEL_COMPLETE(tx_insert) {
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_insert) {
@@ -860,16 +911,15 @@ NURKEL_METHOD(tx_insert) {
     JS_THROW(JS_ERR_NODE);
   }
 
-  ntx->workers++;
-
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_NODE);
   }
+
+  ntx->workers++;
 
   return result;
 }
@@ -927,8 +977,8 @@ NURKEL_COMPLETE(tx_remove) {
 
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_remove) {
@@ -959,15 +1009,15 @@ NURKEL_METHOD(tx_remove) {
     JS_THROW(JS_ERR_ARG);
   }
 
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_ARG);
   }
+
+  ntx->workers++;
 
   return result;
 }
@@ -1041,9 +1091,8 @@ NURKEL_COMPLETE(tx_prove) {
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
-
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_prove) {
@@ -1076,14 +1125,15 @@ NURKEL_METHOD(tx_prove) {
     JS_THROW(JS_ERR_ARG);
   }
 
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
+
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_ARG);
   }
+
+  ntx->workers++;
 
   return result;
 }
@@ -1148,8 +1198,8 @@ NURKEL_COMPLETE(tx_commit) {
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_commit) {
@@ -1173,15 +1223,15 @@ NURKEL_METHOD(tx_commit) {
     JS_THROW(JS_ERR_NODE);
   }
 
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_NODE);
   }
+
+  ntx->workers++;
 
   return result;
 }
@@ -1230,8 +1280,8 @@ NURKEL_COMPLETE(tx_clear) {
 
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_clear) {
@@ -1255,15 +1305,15 @@ NURKEL_METHOD(tx_clear) {
     JS_THROW(JS_ERR_NODE);
   }
 
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_NODE);
   }
+
+  ntx->workers++;
 
   return result;
 }
@@ -1318,8 +1368,8 @@ NURKEL_COMPLETE(tx_inject) {
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_inject) {
@@ -1350,15 +1400,15 @@ NURKEL_METHOD(tx_inject) {
     JS_THROW(JS_ERR_NODE);
   }
 
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     free(worker);
     JS_THROW(JS_ERR_NODE);
   }
+
+  ntx->workers++;
 
   return result;
 }
@@ -1490,9 +1540,9 @@ NURKEL_COMPLETE(tx_apply) {
   }
 
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_tx_close_try_close(env, ntx));
   free(worker->in_ops);
   free(worker);
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 NURKEL_METHOD(tx_apply) {
@@ -1590,15 +1640,15 @@ loop_end:
   NURKEL_CREATE_ASYNC_WORK(tx_apply, worker, result);
   JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
 
-  ntx->workers++;
   status = napi_queue_async_work(env, worker->work);
 
   if (status != napi_ok) {
-    ntx->workers--;
     napi_delete_async_work(env, worker->work);
     err = JS_ERR_NODE;
     goto throw;
   }
+
+  ntx->workers++;
 
   return result;
 

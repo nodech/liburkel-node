@@ -35,111 +35,22 @@
   if (tree_state != inst_state_ok)                         \
     JS_THROW(inst_errors[tree_state]);                     \
                                                            \
-  enum inst_state tx_state = nurkel_tx_ready(ntx);         \
-  if (tx_state != inst_state_ok)                           \
-    JS_THROW(inst_errors[tx_state]);                       \
+  enum nurkel_state_err tx_state = nurkel_tx_ready(ntx);   \
+  if (tx_state != nurkel_state_err_ok)                     \
+    JS_THROW(state_errors[tx_state]);                      \
 } while(0)
-
-/*
- * Transaction workers
- */
-
-typedef struct nurkel_tx_open_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-} nurkel_tx_open_worker_t;
-
-typedef struct nurkel_tx_close_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  bool in_destroy;
-} nurkel_tx_close_worker_t;
-
-typedef struct nurkel_tx_root_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  uint8_t out_hash[URKEL_HASH_SIZE];
-} nurkel_tx_root_hash_worker_t;
-
-typedef struct nurkel_tx_get_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  uint8_t in_key[URKEL_HASH_SIZE];
-
-  uint8_t out_value[URKEL_VALUE_SIZE];
-  size_t out_value_len;
-  bool out_has_key;
-} nurkel_tx_get_worker_t;
-
-typedef struct nurkel_tx_has_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  uint8_t in_key[URKEL_HASH_SIZE];
-
-  bool out_has_key;
-} nurkel_tx_has_worker_t;
-
-typedef struct nurkel_tx_insert_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  uint8_t in_key[URKEL_HASH_SIZE];
-  uint8_t in_value[URKEL_VALUE_SIZE];
-  size_t in_value_len;
-} nurkel_tx_insert_worker_t;
-
-typedef struct nurkel_tx_remove_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  uint8_t in_key[URKEL_HASH_SIZE];
-} nurkel_tx_remove_worker_t;
-
-typedef struct nurkel_tx_prove_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  uint8_t in_key[URKEL_HASH_SIZE];
-  uint8_t *out_proof;
-  size_t out_proof_len;
-} nurkel_tx_prove_worker_t;
-
-typedef struct nurkel_tx_commit_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  uint8_t out_hash[URKEL_HASH_SIZE];
-} nurkel_tx_commit_worker_t;
-
-typedef struct nurkel_tx_clear_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-} nurkel_tx_clear_worker_t;
-
-typedef struct nurkel_tx_inject_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  uint8_t in_root[URKEL_HASH_SIZE];
-} nurkel_tx_inject_worker_t;
-
-typedef struct nurkel_tx_op_s {
-  uint32_t op;
-  size_t value_len;
-  napi_ref key_ref;
-  napi_ref value_ref;
-  uint8_t *key;
-  uint8_t *value;
-} nurkel_tx_op_t;
-
-typedef struct nurkel_tx_apply_worker_s {
-  WORKER_BASE_PROPS(nurkel_tx_t)
-  nurkel_tx_op_t *in_ops;
-  uint32_t in_ops_len;
-} nurkel_tx_apply_worker_t;
 
 /*
  * Transaction life cycle methods.
  */
 
-void
-nurkel_ntx_init(nurkel_tx_t *ntx);
-
-enum inst_state
-nurkel_tx_ready(nurkel_tx_t *ntx);
+napi_status
+nurkel_tx_queue_close_worker(napi_env env,
+                             nurkel_tx_t *ntx,
+                             napi_deferred deferred);
 
 napi_status
-nurkel_tx_close_try_close(napi_env env, nurkel_tx_t *ntx);
-
-void
-nurkel_tx_destroy(napi_env env, void *data, void *hint);
-
-napi_status
-nurkel_tx_close_work(nurkel_tx_close_params_t params);
+nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx);
 
 /*
  * Transaction bindings.
