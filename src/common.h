@@ -31,14 +31,6 @@ extern const int urkel_errors_len;
 #define URKEL_VALUE_SIZE 1023
 #define URKEL_PROOF_SIZE 17957
 
-enum inst_state {
-  inst_state_ok = 0,
-  inst_state_is_closed = 1,
-  inst_state_is_closing = 2,
-  inst_state_is_opening = 3,
-  inst_state_should_close = 4
-};
-
 enum nurkel_state {
   nurkel_state_closed = 0,
   nurkel_state_opening = 1,
@@ -55,7 +47,6 @@ enum nurkel_state_err {
 };
 
 extern const char *state_errors[];
-extern const char *inst_errors[];
 
 /*
  * Nurkel errors
@@ -83,21 +74,26 @@ typedef struct nurkel_tx_entry_s {
   struct nurkel_tx_entry_s *next;
 } nurkel_tx_entry_t;
 
-
 typedef struct nurkel_tree_s {
   urkel_t *tree;
   napi_ref ref;
-  uint32_t workers;
-  void *close_worker;
 
+  /** This is incremented every time async work is running and we can't close */
+  uint32_t workers;
+
+  /** Transactions that depend on the tree. */
   uint32_t tx_len;
   nurkel_tx_entry_t *tx_head;
 
-  bool is_open;
-  bool is_opening;
-  bool is_closing;
-  bool should_close;
-  bool should_cleanup;
+  /** Current state of the tree. */
+  enum nurkel_state state;
+
+  /* If this is set, it means tree needs closing. */
+  void *close_worker;
+
+  bool must_close_txs;
+  /* If this is set, it means tree needs freeing. */
+  bool must_cleanup;
 } nurkel_tree_t;
 
 typedef struct nurkel_tx_s {
@@ -116,7 +112,7 @@ typedef struct nurkel_tx_s {
   /** If this is set, it means transaction needs closing. */
   void *close_worker;
   /** If this is set, it means transaction needs freeing. */
-  bool will_cleanup;
+  bool must_cleanup;
 } nurkel_tx_t;
 
 /*

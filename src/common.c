@@ -26,18 +26,10 @@ urkel_errors[] = {
 
 const int urkel_errors_len = sizeof(urkel_errors) / sizeof(urkel_errors[0]);
 
-const char *inst_errors[] = {
-  "ok.",
-  "is closed.",
-  "is closing.",
-  "is opening.",
-  "should close"
-};
-
 const char *state_errors[] = {
   "ok.",
   "unknown error.",
   "is opening.",
   "is closing.",
-  "is closed"
+  "is closed."
 };

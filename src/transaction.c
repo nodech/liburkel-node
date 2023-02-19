@@ -9,7 +9,7 @@
 #include "transaction.h"
 
 /*
- * Workers for async jobs.
+ * Worker structs for async jobs.
  */
 
 typedef struct nurkel_tx_open_worker_s {
@@ -102,7 +102,7 @@ nurkel_ntx_init(nurkel_tx_t *ntx) {
   ntx->close_worker = NULL;
   ntx->workers = 0;
   ntx->state = nurkel_state_closed;
-  ntx->will_cleanup = false;
+  ntx->must_cleanup = false;
 
   memset(ntx->init_root, 0, URKEL_HASH_SIZE);
 }
@@ -125,7 +125,7 @@ nurkel_tx_ready(nurkel_tx_t *ntx) {
 
   /* This should never happen, as nurkel_tx_ready is only used by
    * methods. Will clean up is only queued when object goes out of scope. */
-  CHECK(ntx->will_cleanup == false);
+  CHECK(ntx->must_cleanup == false);
 
   return nurkel_state_err_ok;
 }
@@ -134,7 +134,7 @@ static napi_status
 nurkel_tx_free(napi_env env, nurkel_tx_t *ntx) {
   CHECK(ntx->state == nurkel_state_closed);
   nurkel_tree_t *ntree = ntx->ntree;
-  ntx->will_cleanup = false;
+  ntx->must_cleanup = false;
   free(ntx);
   NAPI_OK(napi_reference_unref(env, ntree->ref, NULL));
   return napi_ok;
@@ -152,15 +152,14 @@ nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx) {
   if (ntx->close_worker != NULL) {
     CHECK(ntx->state == nurkel_state_open);
     ntx->state = nurkel_state_closing;
-    nurkel_close_worker_t *worker = ntx->close_worker;
+    nurkel_tx_close_worker_t *worker = ntx->close_worker;
     ntx->workers++;
     NAPI_OK(napi_queue_async_work(env, worker->work));
     return napi_ok;
   }
 
-  if (ntx->will_cleanup) {
+  if (ntx->must_cleanup)
     return nurkel_tx_free(env, ntx);
-  }
 
   return napi_ok;
 }
@@ -181,12 +180,12 @@ nurkel_tx_destroy(napi_env env, void *data, void *hint) {
   if (ntx->state != nurkel_state_closed && ntx->close_worker == NULL)
     NAPI_OK(nurkel_tx_queue_close_worker(env, ntx, NULL));
 
-  ntx->will_cleanup = true;
+  ntx->must_cleanup = true;
   NAPI_OK(nurkel_tx_final_check(env, ntx));
 }
 
 static void
-nurkel_close_worker_exec(napi_env env, void *data) {
+nurkel_tx_close_worker_exec(napi_env env, void *data) {
   (void)env;
   nurkel_tx_close_worker_t *worker = data;
   nurkel_tx_t *ntx = worker->ctx;
@@ -197,8 +196,8 @@ nurkel_close_worker_exec(napi_env env, void *data) {
 }
 
 static void
-nurkel_close_worker_complete(napi_env env, napi_status status, void *data) {
-  nurkel_tx_clear_worker_t *worker = data;
+nurkel_tx_close_worker_complete(napi_env env, napi_status status, void *data) {
+  nurkel_tx_close_worker_t *worker = data;
   nurkel_tx_t *ntx = worker->ctx;
   nurkel_tree_t *ntree = ntx->ntree;
 
@@ -224,8 +223,8 @@ nurkel_close_worker_complete(napi_env env, napi_status status, void *data) {
 
   nurkel_unregister_tx(ntx);
   NAPI_OK(napi_delete_async_work(env, worker->work));
-  NAPI_OK(nurkel_close_try_close(env, ntree));
   NAPI_OK(nurkel_tx_final_check(env, ntx));
+  NAPI_OK(nurkel_final_check(env, ntree));
   free(worker);
 }
 
@@ -270,8 +269,8 @@ nurkel_tx_queue_close_worker(napi_env env,
   status = napi_create_async_work(env,
                                   NULL,
                                   workname,
-                                  nurkel_close_worker_exec,
-                                  nurkel_close_worker_complete,
+                                  nurkel_tx_close_worker_exec,
+                                  nurkel_tx_close_worker_complete,
                                   worker,
                                   &worker->work);
 
@@ -382,16 +381,10 @@ NURKEL_METHOD(tx_open) {
   bool is_buffer = false;
   unsigned char *buffer = NULL;
   size_t buffer_len;
-  nurkel_tree_t *ntree;
-  nurkel_tx_t *ntx;
   nurkel_tx_open_worker_t *worker;
 
   NURKEL_ARGV(2);
-
-  /* Grab the tx */
-  status = napi_get_value_external(env, argv[0], (void **)&ntx);
-  JS_ASSERT(status == napi_ok, JS_ERR_ARG);
-  JS_ASSERT(ntx != NULL, JS_ERR_ARG);
+  NURKEL_TX_CONTEXT();
 
   JS_ASSERT(ntx->state != nurkel_state_open, "Transaction is already open.");
   JS_ASSERT(ntx->state != nurkel_state_opening, "Transaction is already opening.");

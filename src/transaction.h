@@ -30,14 +30,14 @@
   JS_ASSERT(ntx != NULL, JS_ERR_ARG);                                        \
   ntree = ntx->ntree
 
-#define NURKEL_TX_READY() do {                             \
-  enum inst_state tree_state = nurkel_tree_ready(ntree);   \
-  if (tree_state != inst_state_ok)                         \
-    JS_THROW(inst_errors[tree_state]);                     \
-                                                           \
-  enum nurkel_state_err tx_state = nurkel_tx_ready(ntx);   \
-  if (tx_state != nurkel_state_err_ok)                     \
-    JS_THROW(state_errors[tx_state]);                      \
+#define NURKEL_TX_READY() do {                                 \
+  enum nurkel_state_err tree_state = nurkel_tree_ready(ntree); \
+  if (tree_state != nurkel_state_err_ok)                       \
+    JS_THROW(state_errors[tree_state]);                        \
+                                                               \
+  enum nurkel_state_err tx_state = nurkel_tx_ready(ntx);       \
+  if (tx_state != nurkel_state_err_ok)                         \
+    JS_THROW(state_errors[tx_state]);                          \
 } while(0)
 
 /*
