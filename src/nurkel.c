@@ -53,6 +53,7 @@ NAPI_MODULE_INIT() {
     F(tree_remove),
     F(tree_prove_sync),
     F(tree_prove),
+    F(tree_debug_info_sync),
     F(verify_sync),
     F(verify),
     F(destroy_sync),

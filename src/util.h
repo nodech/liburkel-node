@@ -71,7 +71,11 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
             JS_ERR_ARG);                                                     \
   JS_ASSERT(argc == n, JS_ERR_ARG)
 
-#define JS_NAPI_OK(status, msg) JS_ASSERT(status == napi_ok, msg)
+#define JS_NAPI_OK_MSG(status, msg) JS_ASSERT(status == napi_ok, msg)
+#define JS_NAPI_OK_ERRNODE(status) JS_ASSERT(status == napi_ok, JS_ERR_NODE)
+
+#define GET_JS_NAPI_OK(_1, _2, NAME, ...) NAME
+#define JS_NAPI_OK(...) GET_JS_NAPI_OK(__VA_ARGS__, JS_NAPI_OK_MSG, JS_NAPI_OK_ERRNODE)(__VA_ARGS__)
 
 #define NURKEL_JS_HASH_OK(arg, var) do { \
   NURKEL_JS_HASH(arg, var);              \

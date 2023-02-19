@@ -78,6 +78,7 @@ NURKEL_METHOD(tree_remove_sync);
 NURKEL_METHOD(tree_remove);
 NURKEL_METHOD(tree_prove_sync);
 NURKEL_METHOD(tree_prove);
+NURKEL_METHOD(tree_debug_info_sync);
 NURKEL_METHOD(verify_sync);
 NURKEL_METHOD(verify);
 NURKEL_METHOD(destroy_sync);

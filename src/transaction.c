@@ -388,7 +388,8 @@ NURKEL_METHOD(tx_open) {
 
   JS_ASSERT(ntx->state != nurkel_state_open, "Transaction is already open.");
   JS_ASSERT(ntx->state != nurkel_state_opening, "Transaction is already opening.");
-  JS_ASSERT(ntx->state != nurkel_state_closing, "Transaction is still closing.");
+  JS_ASSERT(ntx->close_worker == NULL, "Transaction is closing.");
+  JS_ASSERT(ntx->state != nurkel_state_closing, "Transaction is closing.");
   JS_ASSERT(ntx->state == nurkel_state_closed, "Transaction is not closed.");
 
   ntree = ntx->ntree;
