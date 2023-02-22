@@ -1718,6 +1718,73 @@ throw:
   JS_THROW(err);
 }
 
+napi_status
+nurkel_iter_debug_info(napi_env env,
+                       nurkel_iter_t *iter,
+                       napi_value object);
+
+napi_status
+nurkel_tx_debug_info(napi_env env,
+                     nurkel_tx_t *ntx,
+                     napi_value object,
+                     bool expand) {
+  napi_status status;
+
+  napi_value workers;
+  napi_value state;
+  napi_value iters;
+  napi_value queued_close;
+  napi_value queued_close_iters;
+  napi_value iterators;
+
+  uint32_t index = 0;
+  nurkel_dlist_entry_t *head;
+
+  RET_NAPI_NOK(napi_create_int32(env, ntx->workers, &workers));
+  RET_NAPI_NOK(napi_create_int32(env, nurkel_dlist_len(ntx->iter_list), &iters));
+  RET_NAPI_NOK(napi_create_uint32(env, ntx->state, &state));
+  RET_NAPI_NOK(napi_get_boolean(env, ntx->close_worker != NULL, &queued_close));
+  RET_NAPI_NOK(napi_get_boolean(env, ntx->must_close_iters, &queued_close_iters));
+
+  RET_NAPI_NOK(napi_set_named_property(env, object, "workers", workers));
+  RET_NAPI_NOK(napi_set_named_property(env, object, "state", state));
+  RET_NAPI_NOK(napi_set_named_property(env, object, "iters", iters));
+  RET_NAPI_NOK(
+    napi_set_named_property(env, object, "isCloseQueued", queued_close));
+
+  RET_NAPI_NOK(napi_set_named_property(env,
+                                       object,
+                                       "isIterCloseQueued",
+                                       queued_close_iters));
+
+  if (!expand)
+    return napi_ok;
+
+  RET_NAPI_NOK(
+    napi_create_array_with_length(
+      env,
+      nurkel_dlist_len(ntx->iter_list),
+      &iterators
+    )
+  );
+
+  RET_NAPI_NOK(napi_set_named_property(env, object, "iterators", iterators));
+
+  head = nurkel_dlist_iter(ntx->iter_list);
+
+  while (head != NULL) {
+    napi_value info;
+    nurkel_iter_t *iter = nurkel_dlist_get_value(head);
+    RET_NAPI_NOK(napi_create_object(env, &info));
+    RET_NAPI_NOK(nurkel_iter_debug_info(env, iter, info));
+    RET_NAPI_NOK(napi_set_element(env, iterators, index, info));
+    index++;
+    head = nurkel_dlist_iter_next(head);
+  }
+
+  return napi_ok;
+}
+
 /*
  * Iterators for the transaction.
  */
@@ -2144,4 +2211,39 @@ NURKEL_METHOD(iter_next) {
 
   niter->nexting = true;
   return result;
+}
+
+napi_status
+nurkel_iter_debug_info(napi_env env,
+                       nurkel_iter_t *niter,
+                       napi_value object) {
+  napi_status status;
+
+  napi_value nexting;
+  napi_value state;
+  napi_value cache_max_size;
+  napi_value cache_size;
+  napi_value buffer_size;
+  napi_value queued_close;
+
+  size_t alloc_size = niter->cache_max_size * sizeof(nurkel_iter_result_t);
+
+  RET_NAPI_NOK(napi_get_boolean(env, niter->nexting, &nexting));
+  RET_NAPI_NOK(napi_create_int32(env, niter->state, &state));
+  RET_NAPI_NOK(napi_create_int32(env, niter->cache_max_size, &cache_max_size));
+  RET_NAPI_NOK(napi_create_int32(env, niter->cache_size, &cache_size));
+  RET_NAPI_NOK(napi_create_int64(env, alloc_size, &buffer_size));
+  RET_NAPI_NOK(
+    napi_get_boolean(env, niter->close_worker != NULL, &queued_close));
+
+  RET_NAPI_NOK(napi_set_named_property(env, object, "nexting", nexting));
+  RET_NAPI_NOK(napi_set_named_property(env, object, "state", state));
+  RET_NAPI_NOK(
+    napi_set_named_property(env, object, "cacheMaxSize", cache_max_size));
+  RET_NAPI_NOK(napi_set_named_property(env, object, "cacheSize", cache_size));
+  RET_NAPI_NOK(napi_set_named_property(env, object, "bufferSize", buffer_size));
+  RET_NAPI_NOK(
+    napi_set_named_property(env, object, "isCloseQueued", queued_close));
+
+  return napi_ok;
 }

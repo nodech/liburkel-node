@@ -77,6 +77,13 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
 #define GET_JS_NAPI_OK(_1, _2, NAME, ...) NAME
 #define JS_NAPI_OK(...) GET_JS_NAPI_OK(__VA_ARGS__, JS_NAPI_OK_MSG, JS_NAPI_OK_ERRNODE)(__VA_ARGS__)
 
+#define RET_NAPI_NOK(out) do { \
+  status = out;                \
+  if (status != napi_ok)       \
+    return status;             \
+} while (0)
+
+
 #define NURKEL_JS_HASH_OK(arg, var) do { \
   NURKEL_JS_HASH(arg, var);              \
   JS_NAPI_OK((status), JS_ERR_ARG);      \

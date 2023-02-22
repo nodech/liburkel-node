@@ -57,6 +57,13 @@ nurkel_tx_queue_close_worker(napi_env env, nurkel_tx_t *ntx, napi_deferred defer
 napi_status
 nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx);
 
+/* Imported from the transaction. */
+napi_status
+nurkel_tx_debug_info(napi_env,
+                     nurkel_tx_t *ntx,
+                     napi_value object,
+                     bool expand);
+
 /*
  * Tree binding declarations.
  */

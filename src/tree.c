@@ -1055,6 +1055,7 @@ NURKEL_METHOD(tree_prove) {
 
 NURKEL_METHOD(tree_debug_info_sync) {
   bool expand_txs = false;
+  bool expand_iters = false;
 
   napi_value result;
   napi_value workers;
@@ -1067,10 +1068,11 @@ NURKEL_METHOD(tree_debug_info_sync) {
   napi_value transactions;
   nurkel_dlist_entry_t *head;
 
-  NURKEL_ARGV(2);
+  NURKEL_ARGV(3);
   NURKEL_TREE_CONTEXT();
 
   JS_NAPI_OK(napi_get_value_bool(env, argv[1], &expand_txs), JS_ERR_ARG);
+  JS_NAPI_OK(napi_get_value_bool(env, argv[2], &expand_iters), JS_ERR_ARG);
   JS_NAPI_OK(napi_create_object(env, &result));
 
   /* Tree info */
@@ -1080,51 +1082,32 @@ NURKEL_METHOD(tree_debug_info_sync) {
   JS_NAPI_OK(napi_get_boolean(env, ntree->close_worker != NULL, &queued_close));
   JS_NAPI_OK(napi_get_boolean(env, ntree->must_close_txs, &queued_close_txs));
 
-  /* Create transaction objects */
-  JS_NAPI_OK(napi_create_array_with_length(env, nurkel_dlist_len(ntree->tx_list), &transactions));
-
   /* Assemble the object */
   JS_NAPI_OK(napi_set_named_property(env, result, "workers", workers));
   JS_NAPI_OK(napi_set_named_property(env, result, "txs", txs));
   JS_NAPI_OK(napi_set_named_property(env, result, "state", state));
 
   JS_NAPI_OK(
-    napi_set_named_property(env, result, "isCloseQueued", queued_close)
-  );
-
+    napi_set_named_property(env, result, "isCloseQueued", queued_close));
   JS_NAPI_OK(
-    napi_set_named_property(env, result, "isTXCloseQueued", queued_close_txs)
-  );
-
-  JS_NAPI_OK(
-    napi_set_named_property(env, result, "transactions", transactions)
-  );
+    napi_set_named_property(env, result, "isTXCloseQueued", queued_close_txs));
 
   if (!expand_txs)
     return result;
 
+  /* Create transaction objects */
+  JS_NAPI_OK(napi_create_array_with_length(env, nurkel_dlist_len(ntree->tx_list), &transactions));
+
+  JS_NAPI_OK(
+    napi_set_named_property(env, result, "transactions", transactions));
+
   head = nurkel_dlist_iter(ntree->tx_list);
 
   while (head != NULL) {
-    nurkel_tx_t *ntx;
     napi_value tx_info;
-    napi_value tx_workers;
-    napi_value tx_state;
-    napi_value tx_queued_close;
-
-    ntx = nurkel_dlist_get_value(head);
+    nurkel_tx_t *ntx = nurkel_dlist_get_value(head);
     JS_NAPI_OK(napi_create_object(env, &tx_info));
-    JS_NAPI_OK(napi_create_int32(env, ntx->workers, &tx_workers));
-    JS_NAPI_OK(napi_create_int32(env, ntx->state, &tx_state));
-    JS_NAPI_OK(
-      napi_get_boolean(env, ntx->close_worker != NULL, &tx_queued_close)
-    );
-
-    JS_NAPI_OK(napi_set_named_property(env, tx_info, "workers", tx_workers));
-    JS_NAPI_OK(napi_set_named_property(env, tx_info, "state", tx_state));
-    JS_NAPI_OK(
-      napi_set_named_property(env, tx_info, "isCloseQueued", tx_queued_close)
-    );
+    JS_NAPI_OK(nurkel_tx_debug_info(env, ntx, tx_info, expand_iters));
     napi_set_element(env, transactions, index, tx_info);
     index++;
     head = nurkel_dlist_iter_next(head);
