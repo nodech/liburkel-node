@@ -158,4 +158,61 @@ nurkel_get_buffer_copy(napi_env env,
 void
 nurkel_buffer_finalize(napi_env env, void *data, void *hint);
 
+/*
+ * Nurkel DList
+ */
+
+typedef struct nurkel_dlist_entry_s nurkel_dlist_entry_t;
+typedef struct nurkel_dlist_s nurkel_dlist_t;
+
+nurkel_dlist_t *
+nurkel_dlist_alloc();
+
+void
+nurkel_dlist_free(nurkel_dlist_t *list);
+
+size_t
+nurkel_dlist_len(nurkel_dlist_t *list);
+
+void
+nurkel_dlist_remove(nurkel_dlist_t *list, nurkel_dlist_entry_t *entry);
+
+void *
+nurkel_dlist_get_value(nurkel_dlist_entry_t *entry);
+
+nurkel_dlist_entry_t *
+nurkel_dlist_insert(nurkel_dlist_t *list, void *item);
+
+nurkel_dlist_entry_t *
+nurkel_dlist_iter(nurkel_dlist_t *list);
+
+nurkel_dlist_entry_t *
+nurkel_dlist_iter_next(nurkel_dlist_entry_t *entry);
+
+/*
+ * Nurkel general functions
+ */
+
+#define NURKEL_READY(name, type)               \
+enum nurkel_state_err                          \
+nurkel_ ## name ## _ready(type *name) {        \
+  if (name->close_worker != NULL)              \
+    return nurkel_state_err_closing;           \
+                                               \
+  if (name->state != nurkel_state_open) {      \
+    if (name->state == nurkel_state_closed)    \
+      return nurkel_state_err_closed;          \
+                                               \
+    if (name->state == nurkel_state_opening)   \
+      return nurkel_state_err_opening;         \
+                                               \
+    if (name->state == nurkel_state_closing)   \
+      return nurkel_state_err_closing;         \
+  }                                            \
+                                               \
+  CHECK(name->must_cleanup == false);          \
+                                               \
+  return nurkel_state_err_ok;                  \
+}
+
 #endif /* _NURKEL_UTIL_H */

@@ -179,3 +179,108 @@ nurkel_buffer_finalize(napi_env env, void *data, void *hint) {
 
   free(data);
 }
+
+/*
+ * Doubly linked list.
+ */
+
+struct nurkel_dlist_entry_s {
+  void *item;
+
+  struct nurkel_dlist_entry_s *prev;
+  struct nurkel_dlist_entry_s *next;
+};
+
+struct nurkel_dlist_s {
+  size_t len;
+  nurkel_dlist_entry_t *head;
+};
+
+nurkel_dlist_t *
+nurkel_dlist_alloc() {
+  nurkel_dlist_t *list = malloc(sizeof(nurkel_dlist_t));
+
+  if (list == NULL)
+    return NULL;
+
+  list->head = NULL;
+  list->len = 0;
+
+  return list;
+}
+
+void
+nurkel_dlist_free(nurkel_dlist_t *list) {
+  CHECK(list->len == 0);
+  free(list);
+}
+
+size_t
+nurkel_dlist_len(nurkel_dlist_t *list) {
+  return list->len;
+}
+
+void
+nurkel_dlist_remove(nurkel_dlist_t *list, nurkel_dlist_entry_t *entry) {
+  CHECK(entry != NULL);
+  CHECK(list->len > 0);
+
+  list->len--;
+
+  if (list->len == 0)
+    list->head = NULL;
+
+  if (entry->prev != NULL) {
+    entry->prev->next = entry->next;
+  } else {
+    list->head = entry->next;
+  }
+
+  if (entry->next != NULL)
+    entry->next->prev = entry->prev;
+
+  free(entry);
+}
+
+void *
+nurkel_dlist_get_value(nurkel_dlist_entry_t *entry) {
+  CHECK(entry != NULL);
+  return entry->item;
+}
+
+nurkel_dlist_entry_t *
+nurkel_dlist_insert(nurkel_dlist_t *list, void *item) {
+  nurkel_dlist_entry_t *entry = malloc(sizeof(nurkel_dlist_entry_t));
+  CHECK(entry != NULL);
+
+  entry->next = NULL;
+  entry->prev = NULL;
+  entry->item = item;
+
+  list->len++;
+
+  if (list->head == NULL) {
+    list->head = entry;
+    return entry;
+  }
+
+  CHECK(list->head->prev == NULL);
+  list->head->prev = entry;
+  entry->next = list->head;
+  list->head = entry;
+
+  return entry;
+}
+
+nurkel_dlist_entry_t *
+nurkel_dlist_iter(nurkel_dlist_t *list) {
+  return list->head;
+}
+
+nurkel_dlist_entry_t *
+nurkel_dlist_iter_next(nurkel_dlist_entry_t *entry) {
+  if (entry == NULL)
+    return NULL;
+
+  return entry->next;
+}
