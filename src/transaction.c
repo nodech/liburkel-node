@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include "transaction.h"
 
+#include <stdio.h>
+
 /*
  * Worker structs for async jobs.
  */
@@ -94,48 +96,35 @@ typedef struct nurkel_tx_apply_worker_s {
  */
 
 static void
-nurkel_ntx_init(nurkel_tx_t *ntx) {
+nurkel_ntx_init(nurkel_tx_t *ntx, nurkel_dlist_t *list) {
   ntx->tx = NULL;
   ntx->ntree = NULL;
   ntx->entry = NULL;
+  ntx->ref = NULL;
 
   ntx->close_worker = NULL;
   ntx->workers = 0;
   ntx->state = nurkel_state_closed;
   ntx->must_cleanup = false;
+  ntx->must_close_iters = false;
 
+  ntx->iter_list = list;
   memset(ntx->init_root, 0, URKEL_HASH_SIZE);
 }
 
-static enum nurkel_state_err
-nurkel_tx_ready(nurkel_tx_t *ntx) {
-  if (ntx->close_worker != NULL)
-    return nurkel_state_err_closing;
-
-  if (ntx->state != nurkel_state_open) {
-    if (ntx->state == nurkel_state_closed)
-      return nurkel_state_err_closed;
-
-    if (ntx->state == nurkel_state_opening)
-      return nurkel_state_err_opening;
-
-    if (ntx->state == nurkel_state_closing)
-      return nurkel_state_err_closing;
-  }
-
-  /* This should never happen, as nurkel_tx_ready is only used by
-   * methods. Will clean up is only queued when object goes out of scope. */
-  CHECK(ntx->must_cleanup == false);
-
-  return nurkel_state_err_ok;
-}
+static NURKEL_READY(ntx, nurkel_tx_t)
 
 static napi_status
 nurkel_tx_free(napi_env env, nurkel_tx_t *ntx) {
   CHECK(ntx->state == nurkel_state_closed);
-  nurkel_tree_t *ntree = ntx->ntree;
   ntx->must_cleanup = false;
+
+  nurkel_tree_t *ntree = ntx->ntree;
+
+  NAPI_OK(napi_delete_reference(env, ntx->ref));
+  nurkel_dlist_free(ntx->iter_list);
   free(ntx);
+
   NAPI_OK(napi_reference_unref(env, ntree->ref, NULL));
   return napi_ok;
 }
@@ -144,10 +133,18 @@ nurkel_tx_free(napi_env env, nurkel_tx_t *ntx) {
  * This acts as a queue for close and the destroy.
  */
 
+static void
+nurkel_tx_close_iters(napi_env env, nurkel_tx_t *ntx);
+
 napi_status
 nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx) {
   if (ntx->workers > 0)
     return napi_ok;
+
+  if (ntx->must_close_iters) {
+    nurkel_tx_close_iters(env, ntx);
+    return napi_ok;
+  }
 
   if (ntx->close_worker != NULL) {
     CHECK(ntx->state == nurkel_state_open);
@@ -164,13 +161,53 @@ nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx) {
   return napi_ok;
 }
 
+static void
+nurkel_tx_register_iter(nurkel_iter_t *niter) {
+  nurkel_tx_t *ntx = niter->ntx;
+  CHECK(niter->entry == NULL);
+  nurkel_dlist_entry_t *entry = nurkel_dlist_insert(ntx->iter_list, niter);
+  CHECK(entry != NULL);
+  niter->entry = entry;
+}
+
+static void
+nurkel_tx_unregister_iter(nurkel_iter_t *niter) {
+  nurkel_tx_t *ntx = niter->ntx;
+  nurkel_dlist_entry_t *entry = niter->entry;
+  CHECK(entry != NULL);
+  nurkel_dlist_remove(ntx->iter_list, entry);
+}
+
+static napi_status
+nurkel_iter_final_check(napi_env env, nurkel_iter_t *niter);
+
+static napi_status
+nurkel_iter_queue_close_worker(napi_env env,
+                               nurkel_iter_t *niter,
+                               napi_deferred deferred);
+
+static void
+nurkel_tx_close_iters(napi_env env, nurkel_tx_t *ntx) {
+  nurkel_dlist_entry_t *head = nurkel_dlist_iter(ntx->iter_list);
+
+  while (head != NULL) {
+    nurkel_iter_t *niter = nurkel_dlist_get_value(head);
+    NAPI_OK(nurkel_iter_queue_close_worker(env, niter, NULL));
+    NAPI_OK(nurkel_iter_final_check(env, niter));
+    head = nurkel_dlist_iter_next(head);
+  }
+
+  ntx->must_close_iters = false;
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
+}
+
 napi_status
 nurkel_tx_queue_close_worker(napi_env env,
                              nurkel_tx_t *ntx,
                              napi_deferred deferred);
 
 static void
-nurkel_tx_destroy(napi_env env, void *data, void *hint) {
+nurkel_ntx_destroy(napi_env env, void *data, void *hint) {
   (void)hint;
 
   CHECK(data != NULL);
@@ -280,6 +317,7 @@ nurkel_tx_queue_close_worker(napi_env env,
   }
 
   ntx->close_worker = worker;
+  ntx->must_close_iters = true;
 
   return napi_ok;
 }
@@ -287,32 +325,46 @@ nurkel_tx_queue_close_worker(napi_env env,
 NURKEL_METHOD(tx_init) {
   napi_value result;
   napi_status status;
-  nurkel_tx_t *ntx;
+  nurkel_tx_t *ntx = NULL;
+  nurkel_dlist_t *iter_list = NULL;
+  char *err;
 
   NURKEL_ARGV(1);
   NURKEL_TREE_CONTEXT();
   NURKEL_TREE_READY();
 
+  iter_list = nurkel_dlist_alloc();
+  JS_ASSERT(iter_list != NULL, JS_ERR_ALLOC);
+
   ntx = malloc(sizeof(nurkel_tx_t));
-  JS_ASSERT(ntx != NULL, JS_ERR_ALLOC);
-  nurkel_ntx_init(ntx);
+  JS_ASSERT_GOTO_THROW(ntx != NULL, JS_ERR_ALLOC);
+  nurkel_ntx_init(ntx, iter_list);
   ntx->ntree = ntree;
+
+  status = napi_create_external(env, ntx, nurkel_ntx_destroy, NULL, &result);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  /* Make sure we don't clean up transaction if we have iterators. */
+  status = napi_create_reference(env, result, 0, &ntx->ref);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
 
   /* We want the tree to live at least as long as the transaction. */
   status = napi_reference_ref(env, ntree->ref, NULL);
   if (status != napi_ok) {
-    free(ntx);
-    JS_THROW(JS_ERR_NODE);
-  }
-
-  status = napi_create_external(env, ntx, nurkel_tx_destroy, NULL, &result);
-  if (status != napi_ok) {
-    napi_reference_unref(env, ntree->ref, NULL);
-    free(ntx);
-    JS_THROW(JS_ERR_NODE);
+    napi_delete_reference(env, ntx->ref);
+    err = JS_ERR_NODE;
+    goto throw;
   }
 
   return result;
+throw:
+  if (iter_list != NULL)
+    nurkel_dlist_free(iter_list);
+
+  if (ntx != NULL)
+    free(ntx);
+
+  JS_THROW(err);
 }
 
 NURKEL_EXEC(tx_open) {
@@ -451,10 +503,10 @@ NURKEL_METHOD(tx_close) {
   NURKEL_TX_READY();
 
   status = napi_create_promise(env, &deferred, &result);
-  JS_ASSERT(status == napi_ok, "Failed to create promise.");
+  JS_ASSERT(status == napi_ok, "Failed to create the promise.");
 
   status = nurkel_tx_queue_close_worker(env, ntx, deferred);
-  JS_ASSERT(status == napi_ok, "Failed to setup close worker.");
+  JS_ASSERT(status == napi_ok, "Failed to setup the close worker.");
   JS_ASSERT(nurkel_tx_final_check(env, ntx) == napi_ok, "Failed to run final checks.");
 
   return result;
@@ -1000,7 +1052,7 @@ NURKEL_METHOD(tx_remove) {
 
   if (status != napi_ok) {
     free(worker);
-    JS_THROW(JS_ERR_ARG);
+    JS_THROW(JS_ERR_NODE);
   }
 
   status = napi_queue_async_work(env, worker->work);
@@ -1008,7 +1060,7 @@ NURKEL_METHOD(tx_remove) {
   if (status != napi_ok) {
     napi_delete_async_work(env, worker->work);
     free(worker);
-    JS_THROW(JS_ERR_ARG);
+    JS_THROW(JS_ERR_NODE);
   }
 
   ntx->workers++;
@@ -1661,4 +1713,432 @@ throw:
   free(worker->in_ops);
   free(worker);
   JS_THROW(err);
+}
+
+/*
+ * Iterators for the transaction.
+ */
+
+/* Workers */
+typedef struct nurkel_iter_close_worker_s {
+  WORKER_BASE_PROPS(nurkel_iter_t)
+} nurkel_iter_close_worker_t;
+
+typedef struct nurkel_iter_next_worker_s {
+  WORKER_BASE_PROPS(nurkel_iter_t)
+} nurkel_iter_next_worker_t;
+
+static void
+nurkel_niter_init(nurkel_iter_t *niter) {
+  niter->iter = NULL;
+  niter->ntx = NULL;
+
+  niter->cache_max_size = 1;
+  niter->cache_size = 0;
+  niter->buffer = NULL;
+
+  niter->entry = NULL;
+
+  niter->state = nurkel_state_closed;
+  niter->close_worker = NULL;
+  niter->nexting = false;
+  niter->must_cleanup = false;
+}
+
+static NURKEL_READY(niter, nurkel_iter_t)
+
+static napi_status
+nurkel_niter_free(napi_env env, nurkel_iter_t *niter) {
+  nurkel_tx_t *ntx = niter->ntx;
+
+  CHECK(niter->state == nurkel_state_closed);
+  niter->must_cleanup = false;
+
+  free(niter->buffer);
+  free(niter);
+
+  NAPI_OK(napi_reference_unref(env, ntx->ref, NULL));
+  return napi_ok;
+}
+
+static napi_status
+nurkel_iter_final_check(napi_env env, nurkel_iter_t *niter) {
+  if (niter->nexting)
+    return napi_ok;
+
+  if (niter->close_worker != NULL) {
+    CHECK(niter->state == nurkel_state_open);
+    niter->state = nurkel_state_closing;
+    nurkel_iter_close_worker_t *worker = niter->close_worker;
+    niter->nexting = true;
+    NAPI_OK(napi_queue_async_work(env, worker->work));
+    return napi_ok;
+  }
+
+  if (niter->must_cleanup) {
+    return nurkel_niter_free(env, niter);
+  }
+
+  return napi_ok;
+}
+
+static void
+nurkel_niter_destroy(napi_env env, void *data, void *hint) {
+  (void)hint;
+
+  CHECK(data != NULL);
+
+  nurkel_iter_t *niter = data;
+
+  if (niter->state != nurkel_state_closed)
+    NAPI_OK(nurkel_iter_queue_close_worker(env, niter, NULL));
+
+  niter->must_cleanup = true;
+  NAPI_OK(nurkel_iter_final_check(env, niter));
+}
+
+static void
+nurkel_iter_close_worker_exec(napi_env env, void *data) {
+  (void)env;
+  nurkel_iter_close_worker_t *worker = data;
+  nurkel_iter_t *niter = worker->ctx;
+
+  urkel_iter_destroy(niter->iter);
+  niter->iter = NULL;
+  worker->success = true;
+}
+
+static void
+nurkel_iter_close_worker_complete(napi_env env,
+                                   napi_status status,
+                                   void *data) {
+  nurkel_iter_close_worker_t *worker = data;
+  nurkel_iter_t *niter = worker->ctx;
+  nurkel_tx_t *ntx = niter->ntx;
+
+  niter->close_worker = NULL;
+  niter->state = nurkel_state_closed;
+  niter->nexting = false;
+
+  if (worker->deferred != NULL) {
+    napi_value result;
+
+    if (status != napi_ok || worker->success != true) {
+      NAPI_OK(nurkel_create_error(env,
+                                  worker->err_res,
+                                  "Failed to close iterator.",
+                                  &result));
+      NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+    } else {
+      NAPI_OK(napi_get_undefined(env, &result));
+      NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+    }
+  }
+
+  nurkel_tx_unregister_iter(niter);
+  NAPI_OK(napi_delete_async_work(env, worker->work));
+  NAPI_OK(nurkel_iter_final_check(env, niter));
+  NAPI_OK(nurkel_tx_final_check(env, ntx));
+  free(worker);
+}
+
+static napi_status
+nurkel_iter_queue_close_worker(napi_env env,
+                               nurkel_iter_t *niter,
+                               napi_deferred deferred) {
+  CHECK(niter != NULL);
+
+  if (deferred != NULL) {
+    CHECK(niter->close_worker == NULL);
+    CHECK(niter->state == nurkel_state_open);
+  }
+
+  /* We have already queued, ignore another request. */
+  if (niter->close_worker != NULL)
+    return napi_ok;
+
+  napi_value workname;
+  napi_status status;
+  nurkel_iter_close_worker_t *worker;
+
+  status = napi_create_string_latin1(env,
+                                     "nurkel_iter_close",
+                                     NAPI_AUTO_LENGTH,
+                                     &workname);
+
+  if (status != napi_ok)
+    return status;
+
+  worker = malloc(sizeof(nurkel_iter_close_worker_t));
+
+  if (worker == NULL)
+    return napi_generic_failure;
+
+  WORKER_INIT(worker);
+  worker->ctx = niter;
+  worker->deferred = deferred;
+
+  status = napi_create_async_work(env,
+                                  NULL,
+                                  workname,
+                                  nurkel_iter_close_worker_exec,
+                                  nurkel_iter_close_worker_complete,
+                                  worker,
+                                  &worker->work);
+
+  if (status != napi_ok) {
+    free(worker);
+    return status;
+  }
+
+  niter->close_worker = worker;
+
+  return napi_ok;
+}
+
+/* TODO: Test if mallocing on next is better than just having a buffer.
+ * Could potentially avoid buffer_copy to js env. Not high prio. */
+NURKEL_METHOD(iter_init) {
+  napi_value result;
+  napi_status status;
+  nurkel_iter_t *niter;
+  uint32_t cache_max_size;
+  char *err;
+
+  NURKEL_ARGV(2);
+  NURKEL_TX_CONTEXT();
+  NURKEL_TX_READY();
+
+  napi_get_value_uint32(env, argv[1], &cache_max_size);
+  JS_ASSERT(cache_max_size > 0, JS_ERR_ARG);
+
+  niter = malloc(sizeof(nurkel_iter_t));
+  JS_ASSERT(niter != NULL, JS_ERR_ALLOC);
+  nurkel_niter_init(niter);
+  niter->state = nurkel_state_open;
+
+  niter->ntx = ntx;
+  niter->cache_max_size = cache_max_size;
+  niter->buffer = malloc(sizeof(nurkel_iter_result_t) * cache_max_size);
+  JS_ASSERT_GOTO_THROW(niter->buffer != NULL, JS_ERR_ALLOC);
+  niter->iter = urkel_iter_create(ntx->tx);
+
+  status = napi_create_external(env, niter, nurkel_niter_destroy, NULL, &result);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  /* Increment ref counter for the ntx, so it does not go out of scope */
+  /* before iterator. */
+  status = napi_reference_ref(env, ntx->ref, NULL);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  /* Add iterator as a dependency to the tx. */
+  nurkel_tx_register_iter(niter);
+
+  return result;
+
+throw:
+  if (niter->buffer != NULL)
+    free(niter->buffer);
+
+  if (niter != NULL)
+    free(niter);
+
+  JS_THROW(err);
+}
+
+NURKEL_METHOD(iter_close) {
+  napi_value result;
+  napi_status status;
+  napi_deferred deferred;
+
+  NURKEL_ARGV(1);
+  NURKEL_ITER_CONTEXT();
+  NURKEL_ITER_READY();
+
+  status = napi_create_promise(env, &deferred, &result);
+  JS_ASSERT(status == napi_ok, "Failed to create the promise.");
+
+  status = nurkel_iter_queue_close_worker(env, niter, deferred);
+  JS_ASSERT(status == napi_ok, "Failed to setup the close worker.");
+  JS_ASSERT(nurkel_iter_final_check(env, niter) == napi_ok,
+            "Failed to run final checks.");
+
+  return result;
+}
+
+NURKEL_METHOD(iter_next_sync) {
+  napi_value result;
+  uint32_t *pi, i;
+  int iter_s;
+
+  NURKEL_ARGV(1);
+  NURKEL_ITER_CONTEXT();
+  NURKEL_ITER_READY();
+
+  /* Async worker may be working on it already. */
+  JS_ASSERT(!niter->nexting, "Already nexting.");
+
+  pi = &niter->cache_size;
+  for (*pi = 0; *pi < niter->cache_max_size; (*pi)++) {
+    iter_s = urkel_iter_next(niter->iter,
+                             (uint8_t *)&niter->buffer[*pi].key,
+                             (uint8_t *)&niter->buffer[*pi].value,
+                             &niter->buffer[*pi].size);
+
+    if (!iter_s && urkel_errno == URKEL_EITEREND)
+      break;
+
+    if (!iter_s)
+      JS_THROW_CODE(urkel_errno, "Failed to get next items in the iterator.");
+  }
+
+  napi_create_array_with_length(env, niter->cache_size, &result);
+
+  for (i = 0; i < *pi; i++) {
+    napi_handle_scope scope;
+    JS_NAPI_OK(napi_open_handle_scope(env, &scope), JS_ERR_NODE);
+
+    nurkel_iter_result_t *item = (niter->buffer + i);
+    napi_value object;
+    napi_value js_key;
+    napi_value js_value;
+
+    JS_NAPI_OK(napi_create_object(env, &object));
+    JS_NAPI_OK(napi_create_buffer_copy(env,
+                                       URKEL_HASH_SIZE,
+                                       item->key,
+                                       NULL,
+                                       &js_key));
+    JS_NAPI_OK(napi_create_buffer_copy(env,
+                                       item->size,
+                                       item->value,
+                                       NULL,
+                                       &js_value));
+
+    JS_NAPI_OK(napi_set_named_property(env, object, "key", js_key));
+    JS_NAPI_OK(napi_set_named_property(env, object, "value", js_value));
+    JS_NAPI_OK(napi_set_element(env, result, i, object));
+    JS_NAPI_OK(napi_close_handle_scope(env, scope), JS_ERR_NODE);
+  }
+
+  return result;
+}
+
+NURKEL_EXEC(iter_next) {
+  (void)env;
+
+  nurkel_iter_next_worker_t *worker = data;
+  nurkel_iter_t *niter = worker->ctx;
+
+  uint32_t *pi;
+  int iter_s;
+
+  pi = &niter->cache_size;
+
+  for (*pi = 0; *pi < niter->cache_max_size; (*pi)++) {
+    iter_s = urkel_iter_next(niter->iter,
+                             (uint8_t *)&niter->buffer[*pi].key,
+                             (uint8_t *)&niter->buffer[*pi].value,
+                             &niter->buffer[*pi].size);
+
+    if (!iter_s && urkel_errno == URKEL_EITEREND)
+      break;
+
+    if (!iter_s) {
+      worker->success = false;
+      worker->err_res = urkel_errno;
+      return;
+    }
+  }
+
+  worker->success = true;
+}
+
+NURKEL_COMPLETE(iter_next) {
+  napi_value result;
+  nurkel_iter_next_worker_t *worker = data;
+  nurkel_iter_t *niter = worker->ctx;
+  uint32_t i;
+
+  niter->nexting = false;
+
+  if (status != napi_ok || worker->success == false) {
+    NAPI_OK(nurkel_create_error(env,
+                                worker->err_res,
+                                "Failed to iter_next.",
+                                &result));
+    NAPI_OK(napi_reject_deferred(env, worker->deferred, result));
+    NAPI_OK(napi_delete_async_work(env, worker->work));
+    free(worker);
+    NAPI_OK(nurkel_iter_final_check(env, niter));
+    return;
+  }
+
+  napi_create_array_with_length(env, niter->cache_size, &result);
+
+  for (i = 0; i < niter->cache_size; i++) {
+    napi_handle_scope scope;
+    NAPI_OK(napi_open_handle_scope(env, &scope));
+
+    nurkel_iter_result_t *item = (niter->buffer + i);
+    napi_value object;
+    napi_value js_key;
+    napi_value js_value;
+
+    NAPI_OK(napi_create_object(env, &object));
+    NAPI_OK(napi_create_buffer_copy(env,
+                                       URKEL_HASH_SIZE,
+                                       item->key,
+                                       NULL,
+                                       &js_key));
+    NAPI_OK(napi_create_buffer_copy(env,
+                                       item->size,
+                                       item->value,
+                                       NULL,
+                                       &js_value));
+
+    NAPI_OK(napi_set_named_property(env, object, "key", js_key));
+    NAPI_OK(napi_set_named_property(env, object, "value", js_value));
+    NAPI_OK(napi_set_element(env, result, i, object));
+    NAPI_OK(napi_close_handle_scope(env, scope));
+  }
+
+  NAPI_OK(napi_resolve_deferred(env, worker->deferred, result));
+  NAPI_OK(napi_delete_async_work(env, worker->work));
+  free(worker);
+  NAPI_OK(nurkel_iter_final_check(env, niter));
+}
+
+NURKEL_METHOD(iter_next) {
+  napi_value result;
+  napi_status status;
+  nurkel_iter_next_worker_t *worker;
+
+  NURKEL_ARGV(1);
+  NURKEL_ITER_CONTEXT();
+  NURKEL_ITER_READY();
+
+  JS_ASSERT(!niter->nexting, "Already nexting.");
+  worker = malloc(sizeof(nurkel_iter_next_worker_t));
+  JS_ASSERT(worker != NULL, JS_ERR_ALLOC);
+  WORKER_INIT(worker);
+  worker->ctx = niter;
+
+  NURKEL_CREATE_ASYNC_WORK(iter_next, worker, result);
+
+  if (status != napi_ok) {
+    free(worker);
+    JS_THROW(JS_ERR_NODE);
+  }
+
+  status = napi_queue_async_work(env, worker->work);
+
+  if (status != napi_ok) {
+    napi_delete_async_work(env, worker->work);
+    free(worker);
+    JS_THROW(JS_ERR_NODE);
+  }
+
+  niter->nexting = true;
+  return result;
 }

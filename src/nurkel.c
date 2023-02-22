@@ -88,7 +88,13 @@ NAPI_MODULE_INIT() {
     F(tx_inject_sync),
     F(tx_inject),
     F(tx_apply),
-    F(tx_apply_sync)
+    F(tx_apply_sync),
+
+    /* Iter methods */
+    F(iter_init),
+    F(iter_close),
+    F(iter_next_sync),
+    F(iter_next)
 #undef F
   };
 

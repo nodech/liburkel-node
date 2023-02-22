@@ -109,7 +109,7 @@ typedef struct nurkel_stat_worker_s {
  */
 
 static void
-nurkel_ntree_init(nurkel_tree_t *ntree) {
+nurkel_ntree_init(nurkel_tree_t *ntree, nurkel_dlist_t *list) {
   ntree->tree = NULL;
   ntree->ref = NULL;
   ntree->close_worker = NULL;
@@ -120,33 +120,10 @@ nurkel_ntree_init(nurkel_tree_t *ntree) {
   ntree->must_cleanup = false;
   ntree->must_close_txs = false;
 
-  // Init list
-  ntree->tx_len = 0;
-  ntree->tx_head = NULL;
+  ntree->tx_list = list;
 }
 
-enum nurkel_state_err
-nurkel_tree_ready(nurkel_tree_t *ntree) {
-  if (ntree->close_worker != NULL)
-    return nurkel_state_err_closing;
-
-  if (ntree->state != nurkel_state_open) {
-    if (ntree->state == nurkel_state_closed)
-      return nurkel_state_err_closed;
-
-    if (ntree->state == nurkel_state_opening)
-      return nurkel_state_err_opening;
-
-    if (ntree->state == nurkel_state_closing)
-      return nurkel_state_err_closing;
-  }
-
-  /* This should never happen, as nurkel_tree_ready is only used by
-   * methods. Will clean up is only queued when object goes out of scope. */
-  CHECK(ntree->must_cleanup == false);
-
-  return nurkel_state_err_ok;
-}
+NURKEL_READY(ntree, nurkel_tree_t)
 
 static napi_status
 nurkel_tree_free(napi_env env, nurkel_tree_t *ntree) {
@@ -154,12 +131,13 @@ nurkel_tree_free(napi_env env, nurkel_tree_t *ntree) {
   ntree->must_cleanup = false;
 
   NAPI_OK(napi_delete_reference(env, ntree->ref));
+  nurkel_dlist_free(ntree->tx_list);
   free(ntree);
   return napi_ok;
 }
 
 static void
-nurkel_close_work_txs(napi_env env, nurkel_tree_t *ntree);
+nurkel_close_txs(napi_env env, nurkel_tree_t *ntree);
 
 napi_status
 nurkel_final_check(napi_env env, nurkel_tree_t *ntree) {
@@ -167,11 +145,11 @@ nurkel_final_check(napi_env env, nurkel_tree_t *ntree) {
     return napi_ok;
 
   if (ntree->must_close_txs) {
-    nurkel_close_work_txs(env, ntree);
+    nurkel_close_txs(env, ntree);
     return napi_ok;
   }
 
-  if (ntree->tx_len > 0)
+  if (nurkel_dlist_len(ntree->tx_list) > 0)
     return napi_ok;
 
   if (ntree->close_worker != NULL) {
@@ -192,64 +170,28 @@ nurkel_final_check(napi_env env, nurkel_tree_t *ntree) {
 void
 nurkel_register_tx(struct nurkel_tx_s *ntx) {
   nurkel_tree_t *ntree = ntx->ntree;
-  nurkel_tx_entry_t *entry = malloc(sizeof(nurkel_tx_entry_t));
-
+  nurkel_dlist_entry_t *entry = nurkel_dlist_insert(ntree->tx_list, ntx);
   CHECK(entry != NULL);
-
-  ntree->tx_len++;
-
-  entry->next = NULL;
-  entry->prev = NULL;
-  entry->ntx = ntx;
-
   ntx->entry = entry;
-
-  if (ntree->tx_head == NULL) {
-    ntree->tx_head = entry;
-    return;
-  }
-
-  CHECK(ntree->tx_head->prev == NULL);
-
-  ntree->tx_head->prev = entry;
-  entry->next = ntree->tx_head;
-  ntree->tx_head = entry;
 }
 
 void
 nurkel_unregister_tx(struct nurkel_tx_s *ntx) {
   nurkel_tree_t *ntree = ntx->ntree;
-  nurkel_tx_entry_t *entry = ntx->entry;
-
+  nurkel_dlist_entry_t *entry = ntx->entry;
   CHECK(entry != NULL);
-  CHECK(ntree->tx_len > 0);
-
-  ntree->tx_len--;
-  ntx->entry = NULL;
-
-  if (ntree->tx_len == 0)
-    ntree->tx_head = NULL;
-
-  if (entry->prev != NULL) {
-    entry->prev->next = entry->next;
-  } else {
-    ntree->tx_head = entry->next;
-  }
-
-  if (entry->next != NULL)
-    entry->next->prev = entry->prev;
-
-  free(entry);
+  nurkel_dlist_remove(ntree->tx_list, entry);
 }
 
 static void
-nurkel_close_work_txs(napi_env env, nurkel_tree_t *ntree) {
-  nurkel_tx_entry_t *head = ntree->tx_head;
+nurkel_close_txs(napi_env env, nurkel_tree_t *ntree) {
+  nurkel_dlist_entry_t *head = nurkel_dlist_iter(ntree->tx_list);
 
   while (head != NULL) {
-    NAPI_OK(nurkel_tx_queue_close_worker(env, head->ntx, NULL));
-    NAPI_OK(nurkel_tx_final_check(env, head->ntx));
-    head = head->next;
+    nurkel_tx_t *ntx = nurkel_dlist_get_value(head);
+    NAPI_OK(nurkel_tx_queue_close_worker(env, ntx, NULL));
+    NAPI_OK(nurkel_tx_final_check(env, ntx));
+    head = nurkel_dlist_iter_next(head);
   }
 
   ntree->must_close_txs = false;
@@ -375,9 +317,15 @@ NURKEL_METHOD(tree_init) {
   napi_value result;
   nurkel_tree_t *ntree;
 
+  nurkel_dlist_t *tx_list = nurkel_dlist_alloc();
+  JS_ASSERT(tx_list != NULL, JS_ERR_ALLOC);
+
   ntree = malloc(sizeof(nurkel_tree_t));
-  CHECK(ntree != NULL);
-  nurkel_ntree_init(ntree);
+  if (ntree == NULL) {
+    nurkel_dlist_free(tx_list);
+    JS_THROW(JS_ERR_ALLOC);
+  }
+  nurkel_ntree_init(ntree, tx_list);
 
   status = napi_create_external(env,
                                 ntree,
@@ -386,6 +334,7 @@ NURKEL_METHOD(tree_init) {
                                 &result);
 
   if (status != napi_ok) {
+    nurkel_dlist_free(tx_list);
     free(ntree);
     JS_THROW(JS_ERR_INIT);
   }
@@ -395,6 +344,7 @@ NURKEL_METHOD(tree_init) {
   status = napi_create_reference(env, result, 0, &ntree->ref);
 
   if (status != napi_ok) {
+    nurkel_dlist_free(tx_list);
     free(ntree);
     JS_THROW(JS_ERR_INIT);
   }
@@ -1115,7 +1065,7 @@ NURKEL_METHOD(tree_debug_info_sync) {
 
   uint32_t index = 0;
   napi_value transactions;
-  nurkel_tx_entry_t *head;
+  nurkel_dlist_entry_t *head;
 
   NURKEL_ARGV(2);
   NURKEL_TREE_CONTEXT();
@@ -1125,13 +1075,13 @@ NURKEL_METHOD(tree_debug_info_sync) {
 
   /* Tree info */
   JS_NAPI_OK(napi_create_int32(env, ntree->workers, &workers));
-  JS_NAPI_OK(napi_create_int32(env, ntree->tx_len, &txs));
+  JS_NAPI_OK(napi_create_int32(env, nurkel_dlist_len(ntree->tx_list), &txs));
   JS_NAPI_OK(napi_create_int32(env, ntree->state, &state));
   JS_NAPI_OK(napi_get_boolean(env, ntree->close_worker != NULL, &queued_close));
   JS_NAPI_OK(napi_get_boolean(env, ntree->must_close_txs, &queued_close_txs));
 
   /* Create transaction objects */
-  JS_NAPI_OK(napi_create_array_with_length(env, ntree->tx_len, &transactions));
+  JS_NAPI_OK(napi_create_array_with_length(env, nurkel_dlist_len(ntree->tx_list), &transactions));
 
   /* Assemble the object */
   JS_NAPI_OK(napi_set_named_property(env, result, "workers", workers));
@@ -1153,7 +1103,7 @@ NURKEL_METHOD(tree_debug_info_sync) {
   if (!expand_txs)
     return result;
 
-  head = ntree->tx_head;
+  head = nurkel_dlist_iter(ntree->tx_list);
 
   while (head != NULL) {
     nurkel_tx_t *ntx;
@@ -1162,7 +1112,7 @@ NURKEL_METHOD(tree_debug_info_sync) {
     napi_value tx_state;
     napi_value tx_queued_close;
 
-    ntx = head->ntx;
+    ntx = nurkel_dlist_get_value(head);
     JS_NAPI_OK(napi_create_object(env, &tx_info));
     JS_NAPI_OK(napi_create_int32(env, ntx->workers, &tx_workers));
     JS_NAPI_OK(napi_create_int32(env, ntx->state, &tx_state));
@@ -1177,7 +1127,7 @@ NURKEL_METHOD(tree_debug_info_sync) {
     );
     napi_set_element(env, transactions, index, tx_info);
     index++;
-    head = head->next;
+    head = nurkel_dlist_iter_next(head);
   }
 
   return result;
