@@ -185,22 +185,23 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
       assert.strictEqual(dataSync, null);
     }
 
-    // TODO: No iterators yet..
     // Iterate over values.
-    // {
-    //   const ss = tree.snapshot();
-    //   const items = new Map();
+    {
+      const ss = tree.snapshot();
+      const items = new Map();
+      await ss.open();
 
-    //   for await (const [key, value] of ss)
-    //     items.set(key.toString('hex'), value);
+      for await (const [key, value] of ss)
+        items.set(key.toString('hex'), value);
 
-    //   assert.strictEqual(items.size, 3);
-    //   assert.deepStrictEqual(items, new Map([
-    //     [FOO1.toString('hex'), BAR1],
-    //     [FOO2.toString('hex'), BAR2],
-    //     [FOO3.toString('hex'), BAR3]
-    //   ]));
-    // }
+      assert.strictEqual(items.size, 3);
+      assert.deepStrictEqual(items, new Map([
+        [FOO1.toString('hex'), BAR1],
+        [FOO2.toString('hex'), BAR2],
+        [FOO3.toString('hex'), BAR3]
+      ]));
+      await ss.close();
+    }
 
     // Test persistence.
     {
@@ -390,36 +391,38 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
       assert.bufferEqual(tree.rootHash(), root);
     }
 
-    // TODO: Iterators are not implemented. (yet?)
-    // {
-    //   const expect = [];
+    {
+      const expect = [];
 
-    //   for (const [i, item] of items.entries()) {
-    //     if (i < (items.length >>> 1))
-    //       continue;
+      for (const [i, item] of items.entries()) {
+        if (i < (items.length >>> 1))
+          continue;
 
-    //     expect.push(item);
-    //   }
+        expect.push(item);
+      }
 
-    //   expect.sort((a, b) => {
-    //     const [x] = a;
-    //     const [y] = b;
-    //     return x.compare(y);
-    //   });
+      expect.sort((a, b) => {
+        const [x] = a;
+        const [y] = b;
+        return x.compare(y);
+      });
 
-    //   let i = 0;
+      let i = 0;
 
-    //   for await (const [key, value] of tree) {
-    //     const [k, v] = expect[i];
+      const ss = tree.snapshot();
+      await ss.open();
+      for await (const [key, value] of ss) {
+        const [k, v] = expect[i];
 
-    //     assert.bufferEqual(key, k);
-    //     assert.bufferEqual(value, v);
+        assert.bufferEqual(key, k);
+        assert.bufferEqual(value, v);
 
-    //     i += 1;
-    //   }
+        i += 1;
+      }
+      await ss.close();
 
-    //   assert.strictEqual(i, items.length >>> 1);
-    // }
+      assert.strictEqual(i, items.length >>> 1);
+    }
 
     for (let i = 0; i < items.length; i += 11) {
       const [key, value] = items[i];
