@@ -325,6 +325,7 @@ NURKEL_METHOD(tree_init) {
     nurkel_dlist_free(tx_list);
     JS_THROW(JS_ERR_ALLOC);
   }
+
   nurkel_ntree_init(ntree, tx_list);
 
   status = napi_create_external(env,

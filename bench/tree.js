@@ -16,6 +16,7 @@ const BLOCKS = +argv[3] || 10000;
 const PER_BLOCK = +argv[4] || 300;
 const INTERVAL = +argv[5] || 72;
 const TOTAL = BLOCKS * PER_BLOCK;
+const CACHE_SIZE = +argv[6] || 100;
 const FILE = Path.resolve(__dirname, 'treedb');
 
 async function verify(root, key, proof) {
@@ -340,6 +341,63 @@ async function benchVTX(prefix) {
   return tree.close();
 }
 
+async function benchIter(prefix) {
+  const tree = new Tree({ prefix });
+  await tree.open();
+
+  let batch = tree.vbatch();
+  await batch.open();
+
+  console.log(
+    'Committing %d values to tree at a rate of %d per block.',
+    TOTAL,
+    PER_BLOCK);
+
+  const before = util.now();
+  for (let i = 0; i < BLOCKS; i++) {
+    for (let j = 0; j < PER_BLOCK; j++) {
+      const k = crypto.randomBytes(tree.bits >>> 3);
+      const v = crypto.randomBytes(300);
+
+      await batch.insert(k, v);
+    }
+
+    if (i === 0)
+      continue;
+
+    if ((i % INTERVAL) === 0) {
+      await batch.commit();
+      await batch.close();
+      batch = tree.vbatch();
+      await batch.open();
+    }
+
+    if ((i % 100) === 0)
+      console.log('Keys: %d', i * PER_BLOCK);
+  }
+
+  await batch.commit();
+  console.log('Inserted all in (rand included): %d', util.now() - before);
+  console.log('Benchmarking iterator with cache size %d', CACHE_SIZE);
+  const snap = tree.snapshot();
+  await snap.open();
+  const iterator = snap.iterator(CACHE_SIZE);
+
+  let total = 0;
+
+  util.memory();
+
+  const now = util.now();
+  for await (const [k, v] of iterator) {
+    total++;
+  }
+
+  console.log('Iterated all: %d, in %d', total, util.now() - now);
+  util.memory();
+  util.logMemory();
+  await tree.close();
+}
+
 (async () => {
   const arg = argv.length >= 3
     ? argv[2]
@@ -355,6 +413,9 @@ async function benchVTX(prefix) {
     case 'benchVTX':
       console.log('Benchmarking VTX (disk)...');
       return benchVTX(FILE);
+    case 'benchIterator':
+      console.log('Benchmarking iterator...');
+      return benchIter(FILE);
     default:
       console.log('Choose either stress, bench or benchVTX...');
       return null;

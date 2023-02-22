@@ -25,9 +25,9 @@ const OPEN_ITER = {
   nexting: false,
   state: 'open',
   isCloseQueued: false,
-  cacheMaxSize: 1,
+  cacheMaxSize: 100,
   cacheSize: 0,
-  bufferSize: 1064
+  bufferSize: 106400
 };
 
 describe('Nurkel debug state', function() {
