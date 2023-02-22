@@ -146,6 +146,9 @@ nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx) {
     return napi_ok;
   }
 
+  if (nurkel_dlist_len(ntx->iter_list) > 0)
+    return napi_ok;
+
   if (ntx->close_worker != NULL) {
     CHECK(ntx->state == nurkel_state_open);
     ntx->state = nurkel_state_closing;
