@@ -8,8 +8,6 @@
 #include <stdlib.h>
 #include "transaction.h"
 
-#include <stdio.h>
-
 /*
  * Worker structs for async jobs.
  */
