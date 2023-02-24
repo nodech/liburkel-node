@@ -425,7 +425,7 @@ describe('Nurkel debug state', function() {
     it('should close iterator on txn close', async () => {
       await tree.open();
 
-      const txn = tree.transaction()
+      const txn = tree.transaction();
       await txn.open();
 
       // Let's create second one.
