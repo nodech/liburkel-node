@@ -13,9 +13,7 @@ INSTALL
 NEWS
 README
 bench/
-bench/
 build-pre-gyp/
-build/
 build/
 docs/
 node_modules/
