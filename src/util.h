@@ -72,10 +72,7 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
   JS_ASSERT(argc == n, JS_ERR_ARG)
 
 #define JS_NAPI_OK_MSG(status, msg) JS_ASSERT(status == napi_ok, msg)
-#define JS_NAPI_OK_ERRNODE(status) JS_ASSERT(status == napi_ok, JS_ERR_NODE)
-
-#define GET_JS_NAPI_OK(_1, _2, NAME, ...) NAME
-#define JS_NAPI_OK(...) GET_JS_NAPI_OK(__VA_ARGS__, JS_NAPI_OK_MSG, JS_NAPI_OK_ERRNODE)(__VA_ARGS__)
+#define JS_NAPI_OK(status) JS_ASSERT(status == napi_ok, JS_ERR_NODE)
 
 #define RET_NAPI_NOK(out) do { \
   status = out;                \
@@ -86,7 +83,7 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
 
 #define NURKEL_JS_HASH_OK(arg, var) do { \
   NURKEL_JS_HASH(arg, var);              \
-  JS_NAPI_OK((status), JS_ERR_ARG);      \
+  JS_NAPI_OK_MSG((status), JS_ERR_ARG);  \
 } while(0)
 
 #define NURKEL_JS_HASH(arg, var) do {              \
@@ -114,11 +111,11 @@ nurkel_ ## name ## _complete(napi_env env, napi_status status, void *data)
  */
 
 #define WORKER_BASE_PROPS(ctx_t) \
-  ctx_t *ctx;             \
-  int err_res;            \
-  bool success;           \
-  napi_deferred deferred; \
-  napi_async_work work;   \
+  ctx_t *ctx;                    \
+  int err_res;                   \
+  bool success;                  \
+  napi_deferred deferred;        \
+  napi_async_work work;          \
   napi_ref ref;
 
 #define WORKER_INIT(worker) do { \
@@ -172,8 +169,9 @@ nurkel_buffer_finalize(napi_env env, void *data, void *hint);
 typedef struct nurkel_dlist_entry_s nurkel_dlist_entry_t;
 typedef struct nurkel_dlist_s nurkel_dlist_t;
 
+
 nurkel_dlist_t *
-nurkel_dlist_alloc();
+nurkel_dlist_alloc(void);
 
 void
 nurkel_dlist_free(nurkel_dlist_t *list);

@@ -616,12 +616,12 @@ NURKEL_METHOD(tx_get_sync) {
   NURKEL_TX_CONTEXT();
   NURKEL_TX_READY();
 
-  JS_NAPI_OK(napi_is_buffer(env, argv[1], &is_buffer), JS_ERR_ARG);
+  JS_NAPI_OK_MSG(napi_is_buffer(env, argv[1], &is_buffer), JS_ERR_ARG);
   JS_ASSERT(is_buffer, JS_ERR_ARG);
-  JS_NAPI_OK(napi_get_buffer_info(env,
-                                  argv[1],
-                                  (void **)&key_hash,
-                                  &key_hash_len), JS_ERR_ARG);
+  JS_NAPI_OK_MSG(napi_get_buffer_info(env,
+                                      argv[1],
+                                      (void **)&key_hash,
+                                      &key_hash_len), JS_ERR_ARG);
 
   JS_ASSERT(key_hash_len == URKEL_HASH_SIZE, JS_ERR_ARG);
 
@@ -632,13 +632,13 @@ NURKEL_METHOD(tx_get_sync) {
                                        value_len,
                                        value,
                                        NULL,
-                                       &result), JS_ERR_NODE);
+                                       &result));
 
     return result;
   }
 
   if (urkel_errno == URKEL_ENOTFOUND) {
-    JS_NAPI_OK(napi_get_null(env, &result), JS_ERR_NODE);
+    JS_NAPI_OK(napi_get_null(env, &result));
     return result;
   }
 
@@ -759,7 +759,7 @@ NURKEL_METHOD(tx_has_sync) {
     has_key = false;
   }
 
-  JS_NAPI_OK(napi_get_boolean(env, has_key, &result), JS_ERR_NODE);
+  JS_NAPI_OK(napi_get_boolean(env, has_key, &result));
   return result;
 }
 
@@ -863,13 +863,13 @@ NURKEL_METHOD(tx_insert_sync) {
   NURKEL_TX_READY();
   NURKEL_JS_HASH_OK(argv[1], key_buffer);
 
-  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
-  JS_NAPI_OK(napi_is_buffer(env, argv[2], &value_is_buffer), JS_ERR_ARG);
+  JS_NAPI_OK(napi_get_undefined(env, &result));
+  JS_NAPI_OK_MSG(napi_is_buffer(env, argv[2], &value_is_buffer), JS_ERR_ARG);
   JS_ASSERT(value_is_buffer == true, JS_ERR_ARG);
-  JS_NAPI_OK(napi_get_buffer_info(env,
-                                  argv[2],
-                                  (void **)&val_buffer,
-                                  &value_len), JS_ERR_ARG);
+  JS_NAPI_OK_MSG(napi_get_buffer_info(env,
+                                      argv[2],
+                                      (void **)&val_buffer,
+                                      &value_len), JS_ERR_ARG);
   JS_ASSERT(value_len <= URKEL_VALUE_SIZE, JS_ERR_ARG);
   memcpy(value_buffer, val_buffer, value_len);
 
@@ -981,7 +981,7 @@ NURKEL_METHOD(tx_remove_sync) {
   NURKEL_TX_READY();
   NURKEL_JS_HASH_OK(argv[1], key_buffer);
 
-  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
+  JS_NAPI_OK(napi_get_undefined(env, &result));
 
   if (!urkel_tx_remove(ntx->tx, key_buffer))
     JS_THROW(urkel_errors[urkel_errno]);
@@ -1202,7 +1202,7 @@ NURKEL_METHOD(tx_commit_sync) {
                                      URKEL_HASH_SIZE,
                                      tx_root,
                                      NULL,
-                                     &result), JS_ERR_NODE);
+                                     &result));
   return result;
 }
 
@@ -1292,7 +1292,7 @@ NURKEL_METHOD(tx_clear_sync) {
 
   urkel_tx_clear(ntx->tx);
 
-  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
+  JS_NAPI_OK(napi_get_undefined(env, &result));
 
   return result;
 }
@@ -1378,7 +1378,7 @@ NURKEL_METHOD(tx_inject_sync) {
   if (!urkel_tx_inject(ntx->tx, in_root))
     JS_THROW_CODE(urkel_errno, "Failed to tx_inject_sync.");
 
-  JS_NAPI_OK(napi_get_undefined(env, &result), JS_ERR_NODE);
+  JS_NAPI_OK(napi_get_undefined(env, &result));
   return result;
 }
 
@@ -1468,12 +1468,12 @@ NURKEL_METHOD(tx_apply_sync) {
   NURKEL_TX_CONTEXT();
   NURKEL_TX_READY();
 
-  JS_NAPI_OK(napi_get_array_length(env, argv[1], &length), JS_ERR_ARG);
+  JS_NAPI_OK_MSG(napi_get_array_length(env, argv[1], &length), JS_ERR_ARG);
   JS_ASSERT(length != 0, JS_ERR_ARG);
 
   for (i = 0; i < length; i++) {
     napi_handle_scope scope;
-    JS_NAPI_OK(napi_open_handle_scope(env, &scope), JS_ERR_NODE);
+    JS_NAPI_OK(napi_open_handle_scope(env, &scope));
 
     {
       napi_value element, js_op, js_key, js_value;
@@ -1481,25 +1481,26 @@ NURKEL_METHOD(tx_apply_sync) {
       uint8_t *key, *value;
       size_t key_len, value_len;
 
-      JS_NAPI_OK(napi_get_element(env, argv[1], i, &element), JS_ERR_ARG);
+      JS_NAPI_OK_MSG(napi_get_element(env, argv[1], i, &element), JS_ERR_ARG);
 
-      JS_NAPI_OK(napi_get_element(env, element, 0, &js_op), JS_ERR_ARG);
-      JS_NAPI_OK(napi_get_value_uint32(env, js_op, &op), JS_ERR_ARG);
+      JS_NAPI_OK_MSG(napi_get_element(env, element, 0, &js_op), JS_ERR_ARG);
+      JS_NAPI_OK_MSG(napi_get_value_uint32(env, js_op, &op), JS_ERR_ARG);
 
-      JS_NAPI_OK(napi_get_element(env, element, 1, &js_key), JS_ERR_ARG);
+      JS_NAPI_OK_MSG(napi_get_element(env, element, 1, &js_key), JS_ERR_ARG);
       JS_NAPI_OK(napi_get_buffer_info(env,
                                       js_key,
                                       (void **)&key,
-                                      &key_len), JS_ERR_NODE);
+                                      &key_len));
       JS_ASSERT(key_len == URKEL_HASH_SIZE, JS_ERR_ARG);
 
       switch (op) {
         case VTX_OP_INSERT: {
-          JS_NAPI_OK(napi_get_element(env, element, 2, &js_value), JS_ERR_ARG);
+          JS_NAPI_OK_MSG(napi_get_element(env, element, 2, &js_value),
+                         JS_ERR_ARG);
           JS_NAPI_OK(napi_get_buffer_info(env,
                                           js_value,
                                           (void **)&value,
-                                          &value_len), JS_ERR_NODE);
+                                          &value_len));
           if (!urkel_tx_insert(ntx->tx, key, value, value_len))
             JS_THROW(urkel_errors[urkel_errno]);
           break;
@@ -1515,7 +1516,7 @@ NURKEL_METHOD(tx_apply_sync) {
       }
     }
 
-    JS_NAPI_OK(napi_close_handle_scope(env, scope), JS_ERR_NODE);
+    JS_NAPI_OK(napi_close_handle_scope(env, scope));
   }
 
   napi_get_undefined(env, &result);
@@ -1603,7 +1604,7 @@ NURKEL_METHOD(tx_apply) {
   NURKEL_TX_CONTEXT();
   NURKEL_TX_READY();
 
-  JS_NAPI_OK(napi_get_array_length(env, argv[1], &length), JS_ERR_ARG);
+  JS_NAPI_OK_MSG(napi_get_array_length(env, argv[1], &length), JS_ERR_ARG);
   JS_ASSERT(length != 0, JS_ERR_ARG);
 
   worker = malloc(sizeof(nurkel_tx_apply_worker_t));
@@ -2064,7 +2065,7 @@ NURKEL_METHOD(iter_next_sync) {
 
   for (i = 0; i < *pi; i++) {
     napi_handle_scope scope;
-    JS_NAPI_OK(napi_open_handle_scope(env, &scope), JS_ERR_NODE);
+    JS_NAPI_OK(napi_open_handle_scope(env, &scope));
 
     nurkel_iter_result_t *item = (niter->buffer + i);
     napi_value object;
@@ -2086,7 +2087,7 @@ NURKEL_METHOD(iter_next_sync) {
     JS_NAPI_OK(napi_set_named_property(env, object, "key", js_key));
     JS_NAPI_OK(napi_set_named_property(env, object, "value", js_value));
     JS_NAPI_OK(napi_set_element(env, result, i, object));
-    JS_NAPI_OK(napi_close_handle_scope(env, scope), JS_ERR_NODE);
+    JS_NAPI_OK(napi_close_handle_scope(env, scope));
   }
 
   return result;

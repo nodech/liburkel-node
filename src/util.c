@@ -197,7 +197,7 @@ struct nurkel_dlist_s {
 };
 
 nurkel_dlist_t *
-nurkel_dlist_alloc() {
+nurkel_dlist_alloc(void) {
   nurkel_dlist_t *list = malloc(sizeof(nurkel_dlist_t));
 
   if (list == NULL)
