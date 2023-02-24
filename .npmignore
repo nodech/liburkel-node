@@ -20,6 +20,7 @@ node_modules/
 npm-debug.log
 package-lock.json
 patches/
+scripts/
 test/
 .cache
 compile_commands.json
