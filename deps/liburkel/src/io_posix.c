@@ -58,7 +58,6 @@
 
 #if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 #  define HAVE_FCNTL
-#  define HAVE_MMAP
 #  define HAVE_PTHREAD
 #endif
 

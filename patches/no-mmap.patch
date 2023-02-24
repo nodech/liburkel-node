@@ -1,0 +1,11 @@
+diff --git a/deps/liburkel/src/io_posix.c b/deps/liburkel/src/io_posix.c
+index fd06cb7..af3ba72 100644
+--- a/deps/liburkel/src/io_posix.c
++++ b/deps/liburkel/src/io_posix.c
+@@ -58,7 +58,6 @@
+ 
+ #if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+ #  define HAVE_FCNTL
+-#  define HAVE_MMAP
+ #  define HAVE_PTHREAD
+ #endif
