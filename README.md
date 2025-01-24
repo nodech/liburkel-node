@@ -1,5 +1,6 @@
-Nurkel
-======
+# Nurkel
+
+[![Node.js](https://github.com/nodech/nurkel/actions/workflows/node.js.yml/badge.svg)](https://github.com/nodech/nurkel/actions/workflows/node.js.yml)
 
 **Experimental implementation/bindings to the liburkel.**
 
