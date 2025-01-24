@@ -1,7 +1,9 @@
 'use strict';
 
 const assert = require('bsert');
-const {Tree, BLAKE2b} = require('..');
+const BLAKE2bNative = require('../lib/blake2b');
+const BLAKE2bBrowser = require('../lib/blake2b-browser');
+const {Tree} = require('..');
 const vectors = require('./data/blake2b.json');
 
 describe('BLAKE2b', function() {
@@ -28,7 +30,8 @@ describe('BLAKE2b', function() {
     }
   });
 
-  describe('Simple BLAKE2b wrapper', function () {
+  for (const BLAKE2b of [BLAKE2bBrowser, BLAKE2bNative])
+  describe(`Blake2b (${BLAKE2b.native ? 'native' : 'js'})`, function () {
     for (const [hexmsg, size, hexkey, hexexpect] of vectors) {
       const text = hexexpect.slice(0, 32) + '...';
       const msg = Buffer.from(hexmsg, 'hex');

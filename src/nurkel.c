@@ -16,6 +16,7 @@
 #include "util.h"
 #include "tree.h"
 #include "transaction.h"
+#include "blake2b.h"
 
 /*
  * Module
@@ -94,7 +95,13 @@ NAPI_MODULE_INIT() {
     F(iter_init),
     F(iter_close),
     F(iter_next_sync),
-    F(iter_next)
+    F(iter_next),
+
+    /** Blake */
+    F(blake2b_create),
+    F(blake2b_init),
+    F(blake2b_update),
+    F(blake2b_final)
 #undef F
   };
 

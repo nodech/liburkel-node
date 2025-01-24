@@ -321,6 +321,7 @@ NURKEL_METHOD(tree_init) {
   JS_ASSERT(tx_list != NULL, JS_ERR_ALLOC);
 
   ntree = malloc(sizeof(nurkel_tree_t));
+
   if (ntree == NULL) {
     nurkel_dlist_free(tx_list);
     JS_THROW(JS_ERR_ALLOC);

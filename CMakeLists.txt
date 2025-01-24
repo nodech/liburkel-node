@@ -25,7 +25,8 @@ add_node_module(nurkel src/nurkel.c
                        src/util.c
                        src/common.c
                        src/transaction.c
-                       src/tree.c)
+                       src/tree.c
+                       src/blake2b.c)
 target_compile_definitions(nurkel PRIVATE ${nurkel_defines})
 target_compile_options(nurkel PRIVATE ${nurkel_cflags})
 target_link_libraries(nurkel PRIVATE ${nurkel_libs})

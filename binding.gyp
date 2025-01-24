@@ -90,7 +90,8 @@
         "./src/tree.c",
         "./src/transaction.c",
         "./src/util.c",
-        "./src/common.c"
+        "./src/common.c",
+        "./src/blake2b.c"
       ],
       "conditions": [
         ["OS != 'mac' and OS != 'win'", {
