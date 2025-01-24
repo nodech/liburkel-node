@@ -61,14 +61,11 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      - name: Install cmake node
-        run: npm install --location=global cmake-node
-
-      - name: Install dependencies w/o building
-        run: npm install --ignore-scripts
+      - name: Install cmake node and deps
+        run: npm install --ignore-scripts cmake-node
 
       - name: Rebuild using cmake
-        run: cmake-node rebuild --production
+        run: npx cmake-node rebuild --production
 
       - name: Test
         run: npm test
