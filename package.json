@@ -31,5 +31,8 @@
     "buffer-map": "^0.0.7",
     "loady": "^0.0.5",
     "urkel": "^1.0.2"
+  },
+  "browser": {
+    "./lib/blake2b": "./lib/blake2b-browser.js"
   }
 }
