@@ -16,6 +16,9 @@ jobs:
       - name: Install tools
         run: npm install --location=global bslint
 
+      - name: Install bslintrc
+        run: npm install --ignore-scripts bslintrc
+
       - name: Lint
         run: npm run lint
 
