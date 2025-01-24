@@ -1,0 +1,71 @@
+name: Node.js
+on: [push, pull_request]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install tools
+        run: npm install --location=global bslint
+
+      - name: Lint
+        run: npm run lint
+
+  gyp:
+    name: Test with node-gyp
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [14.x, 16.x, 18.x, 20.x, 22.x]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # Pythong 3.10->3.11 broke node-gyp. This upgrades node-gyp for older nodejs.
+      # https://github.com/nodejs/node-gyp/issues/2219
+      - name: Update npm.
+        if: contains(matrix.node, '14.x')
+        run: npm i -g npm@9
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Test
+        run: npm test
+
+  cmake:
+    name: Test with cmake-node
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [14.x, 16.x, 18.x, 20.x, 22.x]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install cmake node
+        run: npm install --location=global cmake-node
+
+      - name: Install dependencies w/o building
+        run: npm install --ignore-scripts
+
+      - name: Rebuild using cmake
+        run: cmake-node rebuild --production
+
+      - name: Test
+        run: npm test
