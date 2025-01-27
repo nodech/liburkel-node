@@ -26,6 +26,9 @@ common.serializeU32 = (num) => {
 };
 
 common.isTreeDir = (dir, locked) => {
+  if (!fs.existsSync(dir))
+    return false;
+
   const files = new Set(fs.readdirSync(dir));
 
   if (files.length < 2)

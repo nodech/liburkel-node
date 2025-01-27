@@ -31,26 +31,41 @@ function random(min, max) {
   return Math.floor(Math.random() * (max - min)) + min;
 }
 
-for (const memory of [false, true]) {
-describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
+const treeCreateOptions = {
+  'nurkel': {},
+  // use legacy tree
+  'urkel': {
+    urkel: true
+  },
+  // legacy tree as in memory tree
+  'memory': {
+    memory: true
+  }
+};
+
+for (const [name, treeTestOptions] of Object.entries(treeCreateOptions)) {
+describe(`Urkel (${name})`, function() {
   this.timeout(20000);
 
-  const Tree = memory ? nurkel.MemTree : nurkel.Tree;
-  let prefix, tree;
+  const Tree = name === 'nurkel' ? nurkel.Tree : nurkel.UrkelTree;
+
+  let prefix, prefix2;
 
   beforeEach(async () => {
     prefix = testdir('tree');
-    if (!memory)
-      fs.mkdirSync(prefix);
+    prefix2 = testdir('tree2');
   });
 
   afterEach(async () => {
-    if (!memory && isTreeDir(prefix))
+    if (name !== 'memory' && isTreeDir(prefix))
       rmTreeDir(prefix);
+
+    if (name !== 'memory' && isTreeDir(prefix2))
+      rmTreeDir(prefix2);
   });
 
   it('should test tree', async () => {
-    const tree = nurkel.create({ prefix, memory });
+    const tree = nurkel.create({ prefix, ...treeTestOptions });
     await tree.open();
 
     let batch = tree.batch();
@@ -237,7 +252,7 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
 
   it('should test max value size', async () => {
     const MAX_VALUE = 0x3ff;
-    const tree = nurkel.create({ prefix, memory });
+    const tree = nurkel.create({ prefix, ...treeTestOptions });
 
     await tree.open();
 
@@ -281,7 +296,7 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
   });
 
   it('should pummel tree', async () => {
-    const tree = nurkel.create({ prefix, memory });
+    const tree = nurkel.create({ prefix, ...treeTestOptions });
 
     const items = [];
     const set = new Set();
@@ -477,7 +492,11 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
   });
 
   it('should test history independence', async () => {
-    const opts = { prefix, memory };
+    const opts1 = { prefix, ...treeTestOptions };
+    const opts2 = {
+      prefix: prefix2,
+      ...treeTestOptions
+    };
 
     const items = [];
     const removed = [];
@@ -489,10 +508,10 @@ describe(`Urkel (${memory ? 'MemTree' : 'Tree'})`, function() {
       items.push([key, value]);
     }
 
-    const tree1 = nurkel.create(opts);
+    const tree1 = nurkel.create(opts1);
     await tree1.open();
 
-    const tree2 = nurkel.create(opts);
+    const tree2 = nurkel.create(opts2);
     await tree2.open();
 
     let root = null;
