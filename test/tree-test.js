@@ -23,7 +23,6 @@ const treeCreateOptions = {
 
 for (const [name, treeTestOptions] of Object.entries(treeCreateOptions)) {
 describe(`Urkel Tree (${name})`, function () {
-    this.timeout(0);
   const Tree = name === 'nurkel' ? nurkel.Tree : nurkel.UrkelTree;
   let prefix, tree;
 

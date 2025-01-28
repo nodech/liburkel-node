@@ -296,6 +296,8 @@ describe(`Urkel (${name})`, function() {
   });
 
   it('should pummel tree', async () => {
+    this.timeout(60000);
+
     const tree = nurkel.create({ prefix, ...treeTestOptions });
 
     const items = [];
