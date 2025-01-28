@@ -57,10 +57,10 @@ describe(`Urkel (${name})`, function() {
   });
 
   afterEach(async () => {
-    if (name !== 'memory' && isTreeDir(prefix))
+    if (isTreeDir(prefix))
       rmTreeDir(prefix);
 
-    if (name !== 'memory' && isTreeDir(prefix2))
+    if (isTreeDir(prefix2))
       rmTreeDir(prefix2);
   });
 

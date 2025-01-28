@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('fs');
-const {testdir, rmTreeDir} = require('./util/common');
+const {testdir, rmTreeDir, isTreeDir} = require('./util/common');
 const {Tree} = require('../lib/tree');
 
 // Tests for the segfaults that were encountered.
@@ -20,7 +20,7 @@ describe('Urkel Transaction (segfault)', function () {
     if (tree.isOpen)
       await tree.close();
 
-    if (fs.existsSync(prefix))
+    if (isTreeDir(prefix))
       rmTreeDir(prefix);
   });
 

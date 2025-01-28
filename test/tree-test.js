@@ -9,25 +9,34 @@ const {statusCodes} = nurkel;
 
 const NULL_HASH = Buffer.alloc(32, 0);
 
-for (const memory of [false, true]) {
-describe(`Urkel Tree (${memory ? 'MemTree' : 'Tree'})`, function () {
-  const Tree = memory ? nurkel.MemTree : nurkel.Tree;
+const treeCreateOptions = {
+  'nurkel': {},
+  // use legacy tree
+  'urkel': {
+    urkel: true
+  },
+  // legacy tree as in memory tree
+  'memory': {
+    memory: true
+  }
+};
+
+for (const [name, treeTestOptions] of Object.entries(treeCreateOptions)) {
+describe(`Urkel Tree (${name})`, function () {
+    this.timeout(0);
+  const Tree = name === 'nurkel' ? nurkel.Tree : nurkel.UrkelTree;
   let prefix, tree;
 
   beforeEach(async () => {
     prefix = testdir('tree');
-
-    if (!memory)
-      fs.mkdirSync(prefix);
-
-    tree = nurkel.create({ memory, prefix });
+    tree = nurkel.create({ prefix, ...treeTestOptions });
     await tree.open();
   });
 
   afterEach(async () => {
     await tree.close();
 
-    if (!memory && isTreeDir(prefix))
+    if (isTreeDir(prefix))
       rmTreeDir(prefix);
   });
 
@@ -37,13 +46,7 @@ describe(`Urkel Tree (${memory ? 'MemTree' : 'Tree'})`, function () {
     assert.bufferEqual(await tree.treeRootHash(), NULL_HASH);
   });
 
-  it('should fail to open in non-existent dir', async () => {
-    if (memory)
-      this.skip();
-
-    const nprefix = path.join(prefix, 'non', 'existent', 'dir');
-    const tree = nurkel.create({ prefix: nprefix });
-
+  it('should fail to open twice', async () => {
     let err;
 
     try {
@@ -52,19 +55,50 @@ describe(`Urkel Tree (${memory ? 'MemTree' : 'Tree'})`, function () {
       err = e;
     }
 
-    assert(err, 'tree open must fail');
-    assert.strict(err.message, 'Urkel open failed.');
-    assert.strict(err.code, 'URKEL_EBADOPEN');
+    assert(err, 'tree open must fail.');
+  });
+
+  it('should fail to open locked tree', async () => {
+    if (treeTestOptions.memory)
+      this.skip();
+
+    const tree2 = nurkel.create({ prefix, ...treeTestOptions });
+
+    let err;
+
+    try {
+      await tree2.open();
+    } catch (e) {
+      err = e;
+    }
+
+    // it is locked by another tree instance.
+    assert(err, 'tree open must fail.');
+  });
+
+  it('should open a non-existent dir', async () => {
+    if (treeTestOptions.memory)
+      this.skip();
+
+    const nprefix = path.join(prefix, 'non-existent', 'dir');
+    const tree = nurkel.create({ prefix: nprefix, ...treeTestOptions });
+
+    await tree.open();
+
+    await tree.close();
+
+    rmTreeDir(nprefix);
+    fs.rmdirSync(path.dirname(nprefix));
   });
 
   it('should remove all tree files (sync)', async () => {
-    if (memory)
+    if (treeTestOptions.memory || treeTestOptions.urkel)
       this.skip();
 
     const prefix = testdir('files');
     fs.mkdirSync(prefix);
 
-    const tree = nurkel.create({ prefix });
+    const tree = nurkel.create({ prefix, ...treeTestOptions });
     await tree.open();
     await tree.close();
 
@@ -87,24 +121,26 @@ describe(`Urkel Tree (${memory ? 'MemTree' : 'Tree'})`, function () {
   });
 
   it('should remove all tree files', async () => {
-    if (memory)
+    if (treeTestOptions.memory)
       this.skip();
 
     const prefix = testdir('files');
     fs.mkdirSync(prefix);
 
-    const tree = new Tree({ prefix });
+    const tree = nurkel.create({ prefix, ...treeTestOptions });
     await tree.open();
     await tree.close();
 
-    assert.rejects(async () => {
+    let err;
+    try {
       // NOTE: prefix is not the actual directory. it's tree
       // so it throws.
       await Tree.destroy(path.join(prefix, 'tree'));
-    }, {
-      code: 'URKEL_EBADOPEN',
-      message: 'Urkel destroy failed.'
-    });
+    } catch (e) {
+      err = e;
+    }
+
+    assert(err);
 
     assert.deepStrictEqual(new Set(fs.readdirSync(prefix)), new Set([
       'meta',

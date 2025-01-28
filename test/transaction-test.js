@@ -8,17 +8,26 @@ const {Proof} = nurkel;
 
 const NULL_HASH = Buffer.alloc(32, 0);
 
-for (const memory of [false, true]) {
-describe(`Urkel Transaction (${memory ? 'MemTree' : 'Tree'})`, function () {
+const treeCreateOptions = {
+  'nurkel': {},
+  // use legacy tree
+  'urkel': {
+    urkel: true
+  },
+  // legacy tree as in memory tree
+  'memory': {
+    memory: true
+  }
+};
+
+for (const [name, treeTestOptions] of Object.entries(treeCreateOptions)) {
+describe(`Urkel Transaction (${name})`, function () {
   let prefix, tree;
 
   beforeEach(async () => {
     prefix = testdir('tx');
 
-    if (!memory)
-      fs.mkdirSync(prefix);
-
-    tree = nurkel.create({ memory, prefix });
+    tree = nurkel.create({ prefix, ...treeTestOptions });
     await tree.open();
   });
 

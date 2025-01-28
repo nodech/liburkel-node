@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('bsert');
-const fs = require('fs');
 const {testdir, rmTreeDir, isTreeDir} = require('./util/common');
 const {Tree} = require('..');
 
@@ -13,7 +12,6 @@ describe('Urkel Tree (GC)', function () {
 
   beforeEach(() => {
     prefix = testdir('tree-gc');
-    fs.mkdirSync(prefix);
   });
 
   afterEach(() => {

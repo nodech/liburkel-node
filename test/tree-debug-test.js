@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('assert');
-const fs = require('fs');
 const {testdir, rmTreeDir, isTreeDir, sleep} = require('./util/common');
 const {Tree} = require('..');
 
@@ -35,8 +34,6 @@ describe('Nurkel debug state', function() {
 
   const before = () => {
     prefix = testdir('tree-gc');
-    fs.mkdirSync(prefix);
-
     tree = new Tree({ prefix });
   };
 
@@ -54,7 +51,18 @@ describe('Nurkel debug state', function() {
     });
 
     it('should open tree', async () => {
+      const afterLock = new Promise((r) => {
+        // mock ensure and open.
+        tree.ensure = () => {};
+        tree.lockFile.open = () => {
+          setImmediate(r);
+          return;
+        };
+      });
+
       const open = tree.open();
+      await afterLock;
+
       assert.deepStrictEqual(tree.debugInfoSync(), {
         ...CLOSED_TREE,
         workers: 1,

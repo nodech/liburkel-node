@@ -1,8 +1,7 @@
 'use strict';
 
 const assert = require('bsert');
-const fs = require('fs');
-const {testdir, rmTreeDir} = require('./util/common');
+const {testdir, rmTreeDir, isTreeDir} = require('./util/common');
 const nurkel = require('..');
 
 const keys = {
@@ -15,8 +14,20 @@ const keys = {
   0: Buffer.alloc(32, 0x00)
 };
 
-for (const memory of [false, true]) {
-describe(`Urkel Iterator (${memory ? 'MemTree' : 'Tree'})`, function () {
+const treeCreateOptions = {
+  'nurkel': {},
+  // use legacy tree
+  'urkel': {
+    urkel: true
+  },
+  // legacy tree as in memory tree
+  'memory': {
+    memory: true
+  }
+};
+
+for (const [name, treeTestOptions] of Object.entries(treeCreateOptions)) {
+describe(`Urkel Iterator (${name})`, function () {
   let prefix, tree;
 
   const addEntries = async () => {
@@ -35,10 +46,7 @@ describe(`Urkel Iterator (${memory ? 'MemTree' : 'Tree'})`, function () {
   beforeEach(async () => {
     prefix = testdir('tx');
 
-    if (!memory)
-      fs.mkdirSync(prefix);
-
-    tree = nurkel.create({ memory, prefix });
+    tree = nurkel.create({ prefix, ...treeTestOptions });
     await tree.open();
 
     await addEntries();
@@ -47,7 +55,7 @@ describe(`Urkel Iterator (${memory ? 'MemTree' : 'Tree'})`, function () {
   afterEach(async () => {
     await tree.close();
 
-    if (fs.existsSync(prefix))
+    if (isTreeDir(prefix))
       rmTreeDir(prefix);
   });
 

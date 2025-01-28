@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('bsert');
-const fs = require('fs');
 const {testdir, rmTreeDir, isTreeDir} = require('./util/common');
 const nurkel = require('..');
 const {BLAKE2b, proofTypes, statusCodes} = nurkel;
@@ -38,9 +37,21 @@ async function populateTree(tree, roots) {
   await txn.close();
 }
 
-for (const memory of [false, true]) {
-describe(`Urkel Proof (${memory ? 'MemTree' : 'Tree'})`, function () {
-  const Tree = memory ? nurkel.MemTree : nurkel.Tree;
+const treeCreateOptions = {
+  'nurkel': {},
+  // use legacy tree
+  'urkel': {
+    urkel: true
+  },
+  // legacy tree as in memory tree
+  'memory': {
+    memory: true
+  }
+};
+
+for (const [name, treeTestOptions] of Object.entries(treeCreateOptions)) {
+describe(`Urkel Proof (${name})`, function () {
+  const Tree = name !== 'nurkel' ? nurkel.UrkelTree : nurkel.Tree;
   let prefix, tree, rootEntries, checkMatrix;
 
   const withSnap = (snap) => {
@@ -54,10 +65,7 @@ describe(`Urkel Proof (${memory ? 'MemTree' : 'Tree'})`, function () {
   beforeEach(async () => {
     prefix = testdir('tree');
 
-    if (!memory)
-      fs.mkdirSync(prefix);
-
-    tree = nurkel.create({ memory, prefix });
+    tree = nurkel.create({ prefix, ...treeTestOptions });
     await tree.open();
     rootEntries = {};
     await populateTree(tree, rootEntries);
@@ -73,7 +81,7 @@ describe(`Urkel Proof (${memory ? 'MemTree' : 'Tree'})`, function () {
   afterEach(async () => {
     await tree.close();
 
-    if (!memory && isTreeDir(prefix))
+    if (isTreeDir(prefix))
       rmTreeDir(prefix);
   });
 

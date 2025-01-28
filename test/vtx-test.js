@@ -1,8 +1,7 @@
 'use strict';
 
 const assert = require('bsert');
-const fs = require('fs');
-const {testdir, rmTreeDir, randomKey} = require('./util/common');
+const {testdir, rmTreeDir, randomKey, isTreeDir} = require('./util/common');
 const nurkel = require('..');
 const {Proof} = nurkel;
 
@@ -21,7 +20,7 @@ describe('Urkel Virtual Transaction', function () {
   afterEach(async () => {
     await tree.close();
 
-    if (fs.existsSync(prefix))
+    if (isTreeDir(prefix))
       rmTreeDir(prefix);
   });
 
