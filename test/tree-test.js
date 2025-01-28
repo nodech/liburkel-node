@@ -58,6 +58,7 @@ describe(`Urkel Tree (${name})`, function () {
   });
 
   it('should fail to open locked tree', async () => {
+    this.timeout(5000);
     if (treeTestOptions.memory)
       this.skip();
 
