@@ -119,11 +119,10 @@ describe('Urkel Virtual Transaction', function () {
       const proof = await txn1.prove(key);
 
       assert(Proof.isProof(proof));
-      assert(Buffer.isBuffer(proof.raw));
 
       if (tree.supportsSync) {
         const proofS = txn1.proveSync(key);
-        assert.bufferEqual(proof.raw, proofS.raw);
+        assert.bufferEqual(proof.encode(), proofS.encode());
       }
     }
 

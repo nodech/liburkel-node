@@ -247,8 +247,8 @@ describe(`Urkel Tree (${name})`, function () {
       const treeProof = treeProofs[i];
 
       if (tree.supportsSync)
-        assert.bufferEqual(treeProofSync.raw, proof.raw);
-      assert.bufferEqual(treeProof.raw, proof.raw);
+        assert.bufferEqual(treeProofSync.encode(), proof.encode());
+      assert.bufferEqual(treeProof.encode(), proof.encode());
 
       if (tree.supportsSync) {
         const [codeSync, valueSync] = Tree.verifySync(
