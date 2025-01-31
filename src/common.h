@@ -47,8 +47,6 @@ enum nurkel_state_err {
   nurkel_state_err_closed = 4,
 };
 
-extern const char *state_errors[];
-
 /*
  * Nurkel errors
  */

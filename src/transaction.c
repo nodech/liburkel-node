@@ -8,6 +8,22 @@
 #include <stdlib.h>
 #include "transaction.h"
 
+const char *txn_state_errors[] = {
+  "ok.",
+  "Transaction - unknown error.",
+  "Transaction is opening.",
+  "Transaction is closing.",
+  "Transaction is closed."
+};
+
+const char *iter_state_errors[] = {
+  "ok.",
+  "Iterator - unknown error.",
+  "Iterator is opening.",
+  "Iterator is closing.",
+  "Iterator is closed."
+};
+
 /*
  * Worker structs for async jobs.
  */
@@ -134,6 +150,9 @@ nurkel_tx_free(napi_env env, nurkel_tx_t *ntx) {
 static void
 nurkel_tx_close_iters(napi_env env, nurkel_tx_t *ntx);
 
+static void
+nurkel_ntx_env_cleanup_hook(void *arg);
+
 napi_status
 nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx) {
   if (ntx->workers > 0)
@@ -156,8 +175,10 @@ nurkel_tx_final_check(napi_env env, nurkel_tx_t *ntx) {
     return napi_ok;
   }
 
-  if (ntx->must_cleanup)
+  if (ntx->must_cleanup) {
+    napi_remove_env_cleanup_hook(env, nurkel_ntx_env_cleanup_hook, ntx);
     return nurkel_tx_free(env, ntx);
+  }
 
   return napi_ok;
 }
@@ -206,6 +227,26 @@ napi_status
 nurkel_tx_queue_close_worker(napi_env env,
                              nurkel_tx_t *ntx,
                              napi_deferred deferred);
+
+static void
+nurkel_ntx_env_cleanup_hook(void *arg) {
+  CHECK(arg != NULL);
+
+  nurkel_tx_t *ntx = arg;
+
+  // sanity checks for nodejs teardown.
+  CHECK(ntx->close_worker == NULL);
+  CHECK(ntx->state != nurkel_state_opening);
+  CHECK(ntx->state != nurkel_state_closing);
+
+  // We don't care about iterators here,
+  // because they will have their own cleanup hooks.
+  if (ntx->state == nurkel_state_open) {
+    urkel_tx_destroy(ntx->tx);
+    nurkel_unregister_tx(ntx);
+    ntx->state = nurkel_state_closed;
+  }
+}
 
 static void
 nurkel_ntx_destroy(napi_env env, void *data, void *hint) {
@@ -349,10 +390,14 @@ NURKEL_METHOD(tx_init) {
   status = napi_create_reference(env, result, 0, &ntx->ref);
   JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
 
-  /* We want the tree to live at least as long as the transaction. */
+  status = napi_add_env_cleanup_hook(env, nurkel_ntx_env_cleanup_hook, ntx);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  /* We want the tree to live at least long as the transaction. */
   status = napi_reference_ref(env, ntree->ref, NULL);
+
   if (status != napi_ok) {
-    napi_delete_reference(env, ntx->ref);
+    napi_remove_env_cleanup_hook(env, nurkel_ntx_env_cleanup_hook, ntx);
     err = JS_ERR_NODE;
     goto throw;
   }
@@ -1830,6 +1875,23 @@ nurkel_niter_free(napi_env env, nurkel_iter_t *niter) {
   return napi_ok;
 }
 
+static void
+nurkel_niter_env_cleanup_hook(void *arg) {
+  CHECK(arg != NULL);
+
+  nurkel_iter_t *niter = arg;
+
+  CHECK(niter->close_worker == NULL);
+  CHECK(niter->state != nurkel_state_opening);
+  CHECK(niter->state != nurkel_state_closing);
+
+  if (niter->state == nurkel_state_open) {
+    urkel_iter_destroy(niter->iter);
+    nurkel_tx_unregister_iter(niter);
+    niter->state = nurkel_state_closed;
+  }
+}
+
 static napi_status
 nurkel_iter_final_check(napi_env env, nurkel_iter_t *niter) {
   if (niter->nexting)
@@ -1845,6 +1907,7 @@ nurkel_iter_final_check(napi_env env, nurkel_iter_t *niter) {
   }
 
   if (niter->must_cleanup) {
+    napi_remove_env_cleanup_hook(env, nurkel_niter_env_cleanup_hook, niter);
     return nurkel_niter_free(env, niter);
   }
 
@@ -1995,10 +2058,18 @@ NURKEL_METHOD(iter_init) {
   status = napi_create_external(env, niter, nurkel_niter_destroy, NULL, &result);
   JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
 
+  status = napi_add_env_cleanup_hook(env, nurkel_niter_env_cleanup_hook, niter);
+  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
   /* Increment ref counter for the ntx, so it does not go out of scope */
   /* before iterator. */
   status = napi_reference_ref(env, ntx->ref, NULL);
-  JS_ASSERT_GOTO_THROW(status == napi_ok, JS_ERR_NODE);
+
+  if (status != napi_ok) {
+    napi_remove_env_cleanup_hook(env, nurkel_niter_env_cleanup_hook, niter);
+    err = JS_ERR_NODE;
+    goto throw;
+  }
 
   /* Add iterator as a dependency to the tx. */
   nurkel_tx_register_iter(niter);

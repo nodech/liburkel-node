@@ -11,6 +11,14 @@
 #include "util.h"
 #include "tree.h"
 
+const char *tree_state_errors[] = {
+  "ok.",
+  "Tree - unknown error.",
+  "Tree is opening.",
+  "Tree is closing.",
+  "Tree is closed."
+};
+
 /*
  * Worker structs for async jobs.
  */
@@ -139,6 +147,9 @@ nurkel_tree_free(napi_env env, nurkel_tree_t *ntree) {
 static void
 nurkel_close_txs(napi_env env, nurkel_tree_t *ntree);
 
+static void
+nurkel_env_cleanup_hook(void *arg);
+
 napi_status
 nurkel_final_check(napi_env env, nurkel_tree_t *ntree) {
   if (ntree->workers > 0)
@@ -161,8 +172,10 @@ nurkel_final_check(napi_env env, nurkel_tree_t *ntree) {
     return napi_ok;
   }
 
-  if (ntree->must_cleanup)
+  if (ntree->must_cleanup) {
+    napi_remove_env_cleanup_hook(env, nurkel_env_cleanup_hook, ntree);
     return nurkel_tree_free(env, ntree);
+  }
 
   return napi_ok;
 }
@@ -245,7 +258,7 @@ nurkel_queue_close_worker(napi_env env,
                           napi_deferred deferred) {
   CHECK(ntree != NULL);
 
-  /* If close worker is not queued by the tx_close, then
+  /* If close worker is not queued by the tree_close, then
    * we don't expect state to be open (it could be opening) */
   if (deferred != NULL) {
     CHECK(ntree->close_worker == NULL);
@@ -297,6 +310,23 @@ nurkel_queue_close_worker(napi_env env,
 }
 
 static void
+nurkel_env_cleanup_hook(void *arg) {
+  CHECK(arg != NULL);
+
+  nurkel_tree_t *ntree = arg;
+
+  // sanity checks for nodejs teardown.
+  CHECK(ntree->close_worker == NULL);
+  CHECK(ntree->state != nurkel_state_opening);
+  CHECK(ntree->state != nurkel_state_closing);
+
+  if (ntree->state == nurkel_state_open) {
+    urkel_close(ntree->tree);
+    ntree->state = nurkel_state_closed;
+  }
+}
+
+static void
 nurkel_ntree_destroy(napi_env env, void *data, void *hint) {
   (void)hint;
 
@@ -329,6 +359,14 @@ NURKEL_METHOD(tree_init) {
 
   nurkel_ntree_init(ntree, tx_list);
 
+  status = napi_add_env_cleanup_hook(env, nurkel_env_cleanup_hook, ntree);
+
+  if (status != napi_ok) {
+    nurkel_dlist_free(tx_list);
+    free(ntree);
+    JS_THROW(JS_ERR_INIT);
+  }
+
   status = napi_create_external(env,
                                 ntree,
                                 nurkel_ntree_destroy,
@@ -336,6 +374,7 @@ NURKEL_METHOD(tree_init) {
                                 &result);
 
   if (status != napi_ok) {
+    napi_remove_env_cleanup_hook(env, nurkel_env_cleanup_hook, ntree);
     nurkel_dlist_free(tx_list);
     free(ntree);
     JS_THROW(JS_ERR_INIT);
@@ -346,6 +385,7 @@ NURKEL_METHOD(tree_init) {
   status = napi_create_reference(env, result, 0, &ntree->ref);
 
   if (status != napi_ok) {
+    napi_remove_env_cleanup_hook(env, nurkel_env_cleanup_hook, ntree);
     nurkel_dlist_free(tx_list);
     free(ntree);
     JS_THROW(JS_ERR_INIT);

@@ -15,6 +15,9 @@
 #include "util.h"
 #include "tree.h"
 
+extern const char *txn_state_errors[];
+extern const char *iter_state_errors[];
+
 #define VTX_OP_INSERT 1
 #define VTX_OP_REMOVE 2
 
@@ -30,32 +33,38 @@
   JS_ASSERT(ntx != NULL, JS_ERR_ARG);                                        \
   ntree = ntx->ntree
 
-#define NURKEL_TX_READY() do {                                  \
-  enum nurkel_state_err tree_state = nurkel_ntree_ready(ntree); \
-  if (tree_state != nurkel_state_err_ok)                        \
-    JS_THROW(state_errors[tree_state]);                         \
-                                                                \
+#define NURKEL_TX_READY() do {                                   \
+  enum nurkel_state_err tree_state = nurkel_ntree_ready(ntree);  \
+  if (tree_state != nurkel_state_err_ok)                         \
+    JS_THROW(tree_state_errors[tree_state]);                     \
+                                                                 \
   enum nurkel_state_err tx_state = nurkel_ntx_ready(ntx);        \
-  if (tx_state != nurkel_state_err_ok)                          \
-    JS_THROW(state_errors[tx_state]);                           \
+  if (tx_state != nurkel_state_err_ok)                           \
+    JS_THROW(txn_state_errors[tx_state]);                        \
 } while(0)
 
 #define NURKEL_ITER_CONTEXT()                                                  \
   nurkel_iter_t *niter = NULL;                                                 \
   nurkel_tx_t *ntx = NULL;                                                     \
+  nurkel_tree_t *ntree = NULL;                                                 \
   JS_ASSERT(napi_get_value_external(env, argv[0], (void **)&niter) == napi_ok, \
             JS_ERR_ARG);                                                       \
   JS_ASSERT(niter != NULL, JS_ERR_ARG);                                        \
-  ntx = niter->ntx
+  ntx = niter->ntx;                                                            \
+  ntree = ntx->ntree
 
-#define NURKEL_ITER_READY() do {                                  \
-  enum nurkel_state_err ntx_state = nurkel_ntx_ready(ntx);        \
-  if (ntx_state != nurkel_state_err_ok)                           \
-    JS_THROW(state_errors[ntx_state]);                            \
-                                                                  \
-  enum nurkel_state_err niter_state = nurkel_niter_ready(niter);  \
-  if (niter_state != nurkel_state_err_ok)                         \
-    JS_THROW(state_errors[niter_state]);                          \
+#define NURKEL_ITER_READY() do {                                   \
+  enum nurkel_state_err tree_state = nurkel_ntree_ready(ntree);    \
+  if (tree_state != nurkel_state_err_ok)                           \
+    JS_THROW(tree_state_errors[tree_state]);                       \
+                                                                   \
+  enum nurkel_state_err ntx_state = nurkel_ntx_ready(ntx);         \
+  if (ntx_state != nurkel_state_err_ok)                            \
+    JS_THROW(txn_state_errors[ntx_state]);                         \
+                                                                   \
+  enum nurkel_state_err niter_state = nurkel_niter_ready(niter);   \
+  if (niter_state != nurkel_state_err_ok)                          \
+    JS_THROW(iter_state_errors[niter_state]);                      \
 } while(0)
 
 /*

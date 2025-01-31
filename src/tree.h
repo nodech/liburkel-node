@@ -14,6 +14,8 @@
 #include "common.h"
 #include "util.h"
 
+extern const char *tree_state_errors[];
+
 /*
  * Tree helper macros.
  */
@@ -24,10 +26,10 @@
             JS_ERR_ARG);                                                       \
   JS_ASSERT(ntree != NULL, JS_ERR_ARG)
 
-#define NURKEL_TREE_READY() do {                               \
+#define NURKEL_TREE_READY() do {                                \
   enum nurkel_state_err tree_state = nurkel_ntree_ready(ntree); \
-  if (tree_state != nurkel_state_err_ok)                       \
-    JS_THROW(state_errors[tree_state]);                        \
+  if (tree_state != nurkel_state_err_ok)                        \
+    JS_THROW(tree_state_errors[tree_state]);                    \
 } while(0)
 
 /*
