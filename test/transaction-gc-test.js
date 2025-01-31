@@ -80,7 +80,7 @@ describe('Urkel Transaction (GC)', function () {
     }
 
     assert(err, 'Close should throw.');
-    assert.strictEqual(err.message, 'is closed.');
+    assert.strictEqual(err.message, 'Tree is closed.');
   });
 
   it('should close all transactions', async () => {
@@ -128,7 +128,7 @@ describe('Urkel Transaction (GC)', function () {
       if (i <= 3)
         assert.strictEqual(err.message, 'Transaction is not open.');
       else
-        assert.strictEqual(err.message, 'is closed.');
+        assert.strictEqual(err.message, 'Tree is closed.');
     }
   });
 

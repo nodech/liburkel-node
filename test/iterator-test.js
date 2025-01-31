@@ -79,11 +79,17 @@ describe(`Urkel Iterator (${name})`, function () {
 
     // Transaction is still closed, but check the nurkel side of things.
     txn.isOpen = true;
-    assert.throws(() => {
+
+    let err;
+
+    try {
       txn.iterator();
-    }, {
-      message: 'is closed.'
-    });
+    } catch (e) {
+      err = e;
+    }
+
+    assert(err, 'should throw error');
+    assert.strictEqual(err.message, 'Transaction is closed.');
   });
 
   it('should create an iterator from snapshot and iterate sync', async () => {

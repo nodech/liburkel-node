@@ -495,7 +495,7 @@ describe('Nurkel debug state', function() {
       }
 
       assert(err);
-      assert.strictEqual(err.message, 'is closing.');
+      assert.strictEqual(err.message, 'Transaction is closing.');
 
       await close;
 
